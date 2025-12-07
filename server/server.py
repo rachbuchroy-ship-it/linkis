@@ -80,12 +80,64 @@ def init_db():
 
 # ---------------- ROUTES ----------------
 
+# קובץ server.py
+# ...
 @app.route("/links", methods=["GET"])
 def get_links():
-    links = Link.query.order_by(Link.created_at.desc()).all()
-    titles = [link.title for link in links]
-    return jsonify(titles), 200
+    query_text = request.args.get('q', default='', type=str).strip()
+    user_id = 1 # **שים לב: כרגע אנחנו מניחים user_id=1 לצורך בדיקה!** # בהמשך, צריך להשיג את user_id מטוקן אימות.
 
+    links_query = db.session.query(Link)
+    
+    # 1. סינון לפי משתמש (חובה!)
+    links_query = links_query.filter(Link.user_id == user_id)
+
+    if query_text:
+        # 2. הוספת לוגיקת דירוג
+        
+        # דירוג 1: התאמה מדויקת לכותרת (ציון גבוה)
+        # דירוג 2: התאמה חלקית לכותרת או תגיות (ציון בינוני)
+        # דירוג 3: התאמה לתיאור (ציון נמוך)
+        
+        search_pattern = f"%{query_text}%"
+        
+        rank_score = db.case(
+            (Link.title.ilike(query_text), 3),
+            (Link.title.ilike(search_pattern), 2),
+            (Link.tags.ilike(search_pattern), 2),
+            (Link.description.ilike(search_pattern), 1),
+            else_=0
+        ).label('rank_score')
+
+        # סנן רק פריטים עם ציון רלוונטיות כלשהו
+        links_query = links_query.add_columns(rank_score).filter(rank_score > 0)
+
+        # 3. מיון: לפי הדירוג שיצרנו (rank_score) ולפי העדכניות (created_at)
+        links_query = links_query.order_by(
+            db.desc(rank_score),
+            db.desc(Link.created_at)
+        )
+
+    links_results = links_query.all()
+    
+    # 4. המרת התוצאות לפורמט מלא יותר (נדרש כדי לשלוף את ה-url)
+    results = []
+    for link_tuple in links_results:
+        # אם יש rank_score, הוא נמצא באינדקס האחרון
+        link = link_tuple[0] if isinstance(link_tuple, tuple) else link_tuple
+        
+        results.append({
+            "id": link.id,
+            "url": link.url, # זה הלינק לקבוצת ווצאפ
+            "title": link.title,
+            "description": link.description,
+            "tags": link.tags,
+            "created_at": link.created_at.isoformat() 
+        })
+        
+    return jsonify(results), 200
+
+# ...
 
 @app.route("/links", methods=["POST"])
 def add_link():

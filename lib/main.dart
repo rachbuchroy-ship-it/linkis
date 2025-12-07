@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-
+import 'dart:async';
+import 'package:url_launcher/url_launcher.dart';
 void main() {
   runApp(const MyApp());
 }
@@ -39,13 +40,13 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   AppView currentView = AppView.menu;
   String? userEmail;   
-
+  Timer? _debounce;
   // password strength
   double _passwordStrength = 0.0; // 0.0 – 1.0
   String _passwordLabel = 'Too weak';
 
   // search state
-  List<String> items = [];
+  List<LinkItem> items = []; // שינוי מ-List<String> ל-List<LinkItem>
   String query = "";
   bool isLoading = false;
 
@@ -111,28 +112,37 @@ Future<Map<String, dynamic>> verifyEmailCode(String email, String code) async {
   }
 
   @override
-  void dispose() {
-    _addController.dispose();
-    usernameController.dispose();
-    passwordController.dispose();
-    emailController.dispose();
-    super.dispose();
-  }
+@override
+void dispose() {
+  // ניקוי הבקר של הוספת הקישור (מוגדר ב-HomePageState)
+  _addController.dispose();
 
+  // ניקוי הטיימר של ה-Debounce (הוספה חובה כאן)
+  _debounce?.cancel();   
+  super.dispose();
+}
 
-
-  Future<void> fetchItems() async {
+Future<void> fetchItems() async {
     setState(() => isLoading = true);
     try {
-      final res = await http.get(Uri.parse('http://127.0.0.1:5000/links'));
+      final uri = Uri.parse('http://127.0.0.1:5000/links').replace(
+        queryParameters: {
+          'q': query,
+          // בעתיד: 'user_id': user_id,
+        },
+      );
+      
+      final res = await http.get(uri);
+      
       if (res.statusCode == 200) {
         final List<dynamic> data = json.decode(res.body);
         setState(() {
-          items = data.map((e) => e.toString()).toList();
+          // קליטת האובייקטים המלאים והמרתם למודל LinkItem
+          items = data.map((e) => LinkItem.fromJson(e as Map<String, dynamic>)).toList();
           isLoading = false;
         });
       } else {
-        throw Exception('Failed to load links');
+        throw Exception('Failed to load links: ${res.statusCode}');
       }
     } catch (e) {
       setState(() => isLoading = false);
@@ -289,10 +299,12 @@ Future<Map<String, dynamic>> verifyEmailCode(String email, String code) async {
         );
 
       // ---------------- SEARCH ----------------
+      // קובץ main.dart - בתוך מתודת build, בתוך ה-switch (currentView)
+
+      // ---------------- SEARCH ----------------
       case AppView.search:
-        final filtered = items
-            .where((it) => it.toLowerCase().contains(query.toLowerCase()))
-            .toList();
+        // משתמשים ישירות ב-items כיוון שהסינון מתבצע בשרת
+        final filtered = items;
 
         return Scaffold(
           appBar: AppBar(
@@ -314,6 +326,7 @@ Future<Map<String, dynamic>> verifyEmailCode(String email, String code) async {
               ? const Center(child: CircularProgressIndicator())
               : Column(
                   children: [
+                    // --- 1. שדה החיפוש (עם Debounce) ---
                     Padding(
                       padding: const EdgeInsets.all(8),
                       child: TextField(
@@ -322,25 +335,67 @@ Future<Map<String, dynamic>> verifyEmailCode(String email, String code) async {
                           border: OutlineInputBorder(),
                           prefixIcon: Icon(Icons.search),
                         ),
-                        onChanged: (v) => setState(() => query = v),
+                        // הוספת ה-Debounce logic כאן:
+                        onChanged: (v) {
+                          if (_debounce?.isActive ?? false) {
+                            _debounce!.cancel();
+                          }
+                          setState(() => query = v);
+
+                          _debounce = Timer(const Duration(milliseconds: 500), () {
+                            // שולח בקשה לשרת רק לאחר שהמשתמש הפסיק להקליד חצי שנייה
+                            if (v.isNotEmpty) {
+                              fetchItems();
+                            } else {
+                              // אם התיבה ריקה, נקה את התוצאות
+                              setState(() => items = []);
+                            }
+                          });
+                        },
                       ),
                     ),
+                    
+                    // --- 2. רשימת התוצאות ---
                     Expanded(
                       child: RefreshIndicator(
                         onRefresh: fetchItems,
                         child: ListView.builder(
                           physics: const AlwaysScrollableScrollPhysics(),
                           itemCount: filtered.length,
-                          itemBuilder: (_, i) => ListTile(
-                            title: Text(filtered[i]),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-        );
-
+                          itemBuilder: (_, i) {
+                            final link = filtered[i]; // זהו אובייקט LinkItem
+                            
+                            return ListTile(
+                              // הכותרת והתיאור
+                              title: Text(link.title),
+                              subtitle: Text(link.description ?? link.tags ?? link.url),
+                              
+                              // כפתור פתיחת ה-URL (Link Launcher)
+                              trailing: IconButton(
+                                icon: const Icon(Icons.link, color: Colors.green),
+                                onPressed: () async {
+                                  final uri = Uri.parse(link.url);
+                                  
+                                  // **בדיקה ופתיחת ה-URL**
+                                  if (await canLaunchUrl(uri)) {
+                                    await launchUrl(uri);
+                                  } else {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('Cannot open link: ${link.url}'),
+                                      ),
+                                    );
+                                  }
+                                },
+                              ), // סגירת IconButton
+                            ); // סגירת ListTile
+                          }, // סגירת itemBuilder
+                        ), // סגירת ListView.builder
+                      ), // סגירת RefreshIndicator
+                    ), // סגירת Expanded
+                  ], // סגירת children: []
+                ), // סגירת Column
+        ); // סגירת Scaffold
       // ---------------- ADD LINK ----------------
       case AppView.add:
         return Scaffold(
@@ -588,15 +643,14 @@ class _SignupFormState extends State<SignupForm> {
   bool _passwordVisible = false;
   bool _confirmPasswordVisible = false;
 
-  @override
-  void dispose() {
-    usernameController.dispose();
-    passwordController.dispose();
-    confirmPasswordController.dispose();
-    emailController.dispose();
-    super.dispose();
-  }
-
+@override
+void dispose() {
+  usernameController.dispose();
+  passwordController.dispose();
+  confirmPasswordController.dispose();
+  emailController.dispose();
+  super.dispose();
+}
   // Simple password strength calculation
   void _onPasswordChanged(String password) {
     double strength = 0.0;
@@ -811,6 +865,32 @@ Future<Map<String, dynamic>> submitCredentials(
           child: const Text("Submit"),
         ),
       ],
+    );
+  }
+}
+// בתחתית main.dart
+class LinkItem {
+  final int id;
+  final String url;
+  final String title;
+  final String? description;
+  final String? tags;
+
+  LinkItem({
+    required this.id,
+    required this.url,
+    required this.title,
+    this.description,
+    this.tags,
+  });
+
+  factory LinkItem.fromJson(Map<String, dynamic> json) {
+    return LinkItem(
+      id: json['id'],
+      url: json['url'],
+      title: json['title'],
+      description: json['description'],
+      tags: json['tags'],
     );
   }
 }
