@@ -2,9 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
-import 'package:shared_preferences/shared_preferences.dart';  // <--- add this
+
 class LoginForm extends StatefulWidget {
-  // parent will get userId, email, username on success
   final void Function(int userId, String email, String username) onLoginSuccess;
 
   const LoginForm({
@@ -32,16 +31,12 @@ class _LoginFormState extends State<LoginForm> {
 
   Future<Map<String, dynamic>> _login(String email, String password) async {
     final url = Uri.parse('http://127.0.0.1:5000/login');
-    // For Android emulator: http://10.0.2.2:5000/login
 
     try {
       final res = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'email': email,
-          'password': password,
-        }),
+        body: jsonEncode({'email': email, 'password': password}),
       );
 
       final body = jsonDecode(res.body);
@@ -66,6 +61,76 @@ class _LoginFormState extends State<LoginForm> {
     }
   }
 
+Future<Map<String, dynamic>> _requestPasswordResetLink(String email) async {
+  final url = Uri.parse('http://127.0.0.1:5000/requestPasswordReset');
+
+  try {
+    final res = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'email': email}),
+    );
+
+    final body = jsonDecode(res.body);
+    return {
+      'success': body['success'] == true,
+      'message': body['message'] ?? body['error'] ?? 'Done',
+      'statusCode': res.statusCode,
+    };
+  } catch (e) {
+    return {
+      'success': false,
+      'message': 'Error: $e',
+      'statusCode': 0,
+    };
+  }
+}
+
+  Future<void> _showForgotPasswordDialog() async {
+    final TextEditingController forgotEmailController =
+        TextEditingController(text: emailController.text.trim());
+
+    final email = await showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Forgot password'),
+          content: TextField(
+            controller: forgotEmailController,
+            keyboardType: TextInputType.emailAddress,
+            decoration: const InputDecoration(
+              labelText: 'Email',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(null),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () =>
+                  Navigator.of(ctx).pop(forgotEmailController.text.trim()),
+              child: const Text('Send'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (!mounted) return;
+    if (email == null || email.isEmpty) return;
+
+    setState(() => _isLoading = true);
+    final result = await _requestPasswordResetLink(email);
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(result['message'] ?? 'Done')),
+    );
+  }
+
   Future<void> _onLoginPressed() async {
     final email = emailController.text.trim();
     final password = passwordController.text.trim();
@@ -78,9 +143,8 @@ class _LoginFormState extends State<LoginForm> {
     }
 
     setState(() => _isLoading = true);
-
     final result = await _login(email, password);
-
+    if (!mounted) return;
     setState(() => _isLoading = false);
 
     if (result['success'] == true) {
@@ -111,7 +175,6 @@ class _LoginFormState extends State<LoginForm> {
         ),
         const SizedBox(height: 24),
 
-        // Email
         TextField(
           controller: emailController,
           decoration: const InputDecoration(
@@ -122,7 +185,6 @@ class _LoginFormState extends State<LoginForm> {
         ),
         const SizedBox(height: 16),
 
-        // Password
         TextField(
           controller: passwordController,
           obscureText: !_passwordVisible,
@@ -130,20 +192,22 @@ class _LoginFormState extends State<LoginForm> {
             labelText: 'Password',
             border: const OutlineInputBorder(),
             suffixIcon: IconButton(
-              icon: Icon(
-                _passwordVisible ? Icons.visibility : Icons.visibility_off,
-              ),
-              onPressed: () {
-                setState(() {
-                  _passwordVisible = !_passwordVisible;
-                });
-              },
+              icon: Icon(_passwordVisible ? Icons.visibility : Icons.visibility_off),
+              onPressed: () => setState(() => _passwordVisible = !_passwordVisible),
             ),
           ),
         ),
-        const SizedBox(height: 24),
 
-        // Login button
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: _isLoading ? null : _showForgotPasswordDialog,
+            child: const Text('Forgot password?'),
+          ),
+        ),
+
+        const SizedBox(height: 8),
+
         ElevatedButton(
           onPressed: _isLoading ? null : _onLoginPressed,
           child: _isLoading

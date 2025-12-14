@@ -8,15 +8,11 @@ import 'dart:convert';
 const String baseUrl = "http://127.0.0.1:5000";
 
 class AddLinkForm extends StatefulWidget {
-  final String title;
   final int? loggedInUserId;
-  final VoidCallback onBack;
 
   const AddLinkForm({
     super.key,
-    required this.title,
     required this.loggedInUserId,
-    required this.onBack,
   });
 
   @override
@@ -54,14 +50,24 @@ class _AddLinkFormState extends State<AddLinkForm> {
     final title = _titleController.text.trim();
     final description = _descriptionController.text.trim();
     final tags = _tagsController.text.trim();
-
+    
     if (url.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a link')),
       );
       return;
     }
-
+    if ( title.isEmpty ) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a title')),
+      );
+      return;
+    }    if (description.length < 20) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter more then 20 letters in description')),
+      );
+      return;
+    }
     if (widget.loggedInUserId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('You must be logged in to add a link')),
@@ -122,11 +128,7 @@ class _AddLinkFormState extends State<AddLinkForm> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.title),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: widget.onBack,
-        ),
+        title: Text("add link"),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -148,7 +150,7 @@ class _AddLinkFormState extends State<AddLinkForm> {
               TextField(
                 controller: _titleController,
                 decoration: const InputDecoration(
-                  labelText: 'Title (optional)',
+                  labelText: 'Title',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -158,7 +160,7 @@ class _AddLinkFormState extends State<AddLinkForm> {
               TextField(
                 controller: _descriptionController,
                 decoration: const InputDecoration(
-                  labelText: 'Description (optional)',
+                  labelText: 'Description (atleast 20 letters)',
                   border: OutlineInputBorder(),
                 ),
                 maxLines: 3,

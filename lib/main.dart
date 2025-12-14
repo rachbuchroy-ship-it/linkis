@@ -27,16 +27,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
-enum AppView {
-  menu,
-  search,
-  add,
-  categories,
-  signup,
-  verifyEmail,
-  logIn,
-  signUpOrLogin,
-}
+
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -46,7 +37,6 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  AppView currentView = AppView.menu;
   String? userEmail;
   int? loggedInUserId;
   String? loggedInEmail;
@@ -61,6 +51,104 @@ class _HomePageState extends State<HomePage> {
     _loadSession();
   }
 
+  void _openAddLink() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AddLinkForm(
+          loggedInUserId: loggedInUserId,     
+        ),
+      ),
+    );
+  }
+void _openSearch() {
+  if (loggedInUserId == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Please log in first')),
+    );
+    return;
+  }
+
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => SearchForm(userId: loggedInUserId!),
+    ),
+  );
+}
+  void _openSignUpOrLogin() {
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (context) => SignUpOrLoginForm(
+        onBack: () => Navigator.pop(context),
+
+        onLogin: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => Scaffold(
+                appBar: AppBar(title: const Text('Log in')),
+                body: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: SingleChildScrollView(
+                    child: LoginForm(
+                      onLoginSuccess: (userId, email, username) async {
+                        final prefs = await SharedPreferences.getInstance();
+                        await prefs.setInt('user_id', userId);
+                        await prefs.setString('email', email);
+                        await prefs.setString('username', username);
+
+                        // close login screen + chooser screen
+                        Navigator.pop(context); // close login
+                        Navigator.pop(context); // close chooser
+
+                        await _loadSession(); // refresh menu username
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+
+        onSignup: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => Scaffold(
+                appBar: AppBar(title: const Text('Sign up')),
+                body: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: SingleChildScrollView(
+                    child: SignupForm(
+                      onSignupSuccess: (email) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => VerifyEmailForm(
+                              email: email,
+                              onBack: () => Navigator.pop(context),
+                              onVerified: () {
+                                Navigator.pop(context); // close verify
+                                Navigator.pop(context); // close signup
+                              },
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    ),
+  );
+}
   Future<void> _loadSession() async {
     final prefs = await SharedPreferences.getInstance();
     final userId = prefs.getInt('user_id');
@@ -90,7 +178,7 @@ class _HomePageState extends State<HomePage> {
       loggedInUserId = null;
       loggedInEmail = null;
       loggedInUsername = null;
-      currentView = AppView.menu;
+      Navigator.popUntil(context, (route) => route.isFirst);
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -98,140 +186,19 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  void goTo(AppView view) {
-    setState(() {
-      currentView = view;
-    });
-  }
 
-  String _titleFor(AppView v) {
-    switch (v) {
-      case AppView.add:
-        return 'Add Link';
-      case AppView.categories:
-        return 'Categories';
-      case AppView.signup:
-        return 'Sign Up';
-      case AppView.search:
-        return 'Search';
-      default:
-        return 'Menu';
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
-    switch (currentView) {
-      // -------------- MENU ----------------
-      case AppView.menu:
-        return MenuForm(
-          isLoggedIn: isLoggedIn,
-          username: loggedInUsername,
-          onSearch: () => goTo(AppView.search),
-          onAddLink: () => goTo(AppView.add),
-          onCategories: () => goTo(AppView.categories),
-          onSignUpOrLogin: () => goTo(AppView.signUpOrLogin),
-          onLogout: isLoggedIn ? logout : null,
-        );
-
-      // -------------- SIGN UP OR LOGIN CHOOSER ----------------
-      case AppView.signUpOrLogin:
-        return SignUpOrLoginForm(
-          onBack: () => goTo(AppView.menu),
-          onLogin: () => goTo(AppView.logIn),
-          onSignup: () => goTo(AppView.signup),
-        );
-
-      // -------------- SEARCH ----------------
-      case AppView.search:
-        return SearchForm(
-          onBack: () => goTo(AppView.menu),
-        );
-
-      // -------------- ADD LINK ----------------
-      case AppView.add:
-        return AddLinkForm(
-          title: _titleFor(currentView),
-          loggedInUserId: loggedInUserId,
-          onBack: () => goTo(AppView.menu),
-        );
-
-      // -------------- CATEGORIES ----------------
-      case AppView.categories:
-        return CategoriesForm(
-          title: _titleFor(currentView),
-          onBack: () => goTo(AppView.menu),
-        );
-
-      // -------------- LOG IN ----------------
-      case AppView.logIn:
-        return Scaffold(
-          appBar: AppBar(
-            title: const Text('Log in'),
-            leading: IconButton(
-              icon: const Icon(Icons.arrow_back),
-              onPressed: () => goTo(AppView.menu),
-            ),
-          ),
-          body: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: SingleChildScrollView(
-              child: LoginForm(
-                onLoginSuccess: (userId, email, username) async {
-                  print('LOGIN SUCCESS: userId=$userId, email=$email, username=$username');
-
-                  final prefs = await SharedPreferences.getInstance();
-                  final ok1 = await prefs.setInt('user_id', userId);
-                  final ok2 = await prefs.setString('email', email);
-                  final ok3 = await prefs.setString('username', username);
-                  print('PREFS SAVED: userId=$ok1, email=$ok2, username=$ok3');
-
-                  setState(() {
-                    loggedInUserId = userId;
-                    loggedInEmail = email;
-                    loggedInUsername = username;
-                  });
-
-                  goTo(AppView.menu);
-                },
-              ),
-            ),
-          ),
-        );
-
-      // -------------- SIGN UP ----------------
-      case AppView.signup:
-        return Scaffold(
-          appBar: AppBar(
-            title: Text(_titleFor(currentView)),
-            leading: IconButton(
-              icon: const Icon(Icons.arrow_back),
-              onPressed: () => goTo(AppView.menu),
-            ),
-          ),
-          body: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: SingleChildScrollView(
-              child: SignupForm(
-                onSignupSuccess: (email) {
-                  setState(() {
-                    userEmail = email;
-                  });
-                  goTo(AppView.verifyEmail);
-                },
-              ),
-            ),
-          ),
-        );
-
-      // -------------- VERIFY EMAIL ----------------
-      case AppView.verifyEmail:
-        return VerifyEmailForm(
-          email: userEmail ?? 'unknown@email.com',
-          onBack: () => goTo(AppView.menu),
-          onVerified: () => goTo(AppView.logIn),
-        );
-    }
+    return MenuForm(
+      isLoggedIn: isLoggedIn,
+      username: loggedInUsername,
+      onSearch: _openSearch,                     // 👈 use Navigator
+      onAddLink: _openAddLink,
+      onSignUpOrLogin: _openSignUpOrLogin,
+      onLogout: isLoggedIn ? logout : null,
+    );
+    
   }
 }
 
@@ -242,7 +209,6 @@ class MenuForm extends StatelessWidget {
   final String? username;
   final VoidCallback onSearch;
   final VoidCallback onAddLink;
-  final VoidCallback onCategories;
   final VoidCallback onSignUpOrLogin;
   final Future<void> Function()? onLogout;
 
@@ -252,7 +218,6 @@ class MenuForm extends StatelessWidget {
     required this.username,
     required this.onSearch,
     required this.onAddLink,
-    required this.onCategories,
     required this.onSignUpOrLogin,
     this.onLogout,
   });
@@ -280,11 +245,6 @@ class MenuForm extends StatelessWidget {
               icon: Icons.group_add,
               label: 'Add Link',
               onTap: onAddLink,
-            ),
-            _MenuButton(
-              icon: Icons.category,
-              label: 'Categories',
-              onTap: onCategories,
             ),
             _MenuButton(
               icon: Icons.person_add,
