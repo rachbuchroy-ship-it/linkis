@@ -6,8 +6,8 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class SearchForm extends StatefulWidget {
-  const SearchForm({super.key, required this.userId});
-  final int userId;
+  const SearchForm({super.key, this.userId}); // 👈 nullable
+  final int? userId;
 
   @override
   State<SearchForm> createState() => _SearchFormState();
@@ -15,7 +15,9 @@ class SearchForm extends StatefulWidget {
 
 class _SearchFormState extends State<SearchForm> {
   final TextEditingController linkSearchName = TextEditingController();
-  int get currentUserId => widget.userId;
+  int? get currentUserId => widget.userId; // 👈 nullable
+  bool get isGuest => currentUserId == null;
+
   bool isLoading = false;
   String? errorMessage;
   List<dynamic> searchResults = [];
@@ -137,11 +139,14 @@ Future<void> _shareToWhatsApp(String title, String url) async {
     });
 
     try {
+      final params = <String, String>{'query': query};
+
+      if (currentUserId != null) {
+        params['user_id'] = currentUserId.toString();
+      }
+
       final url = Uri.parse('http://127.0.0.1:5000/search').replace(
-        queryParameters: {
-          'query': query,
-          'user_id': currentUserId.toString(), // needed for liked_by_me
-        },
+        queryParameters: params,
       );
 
       final res = await http.get(url);
@@ -417,7 +422,7 @@ Future<void> _shareToWhatsApp(String title, String url) async {
                                     likedByMe ? Icons.favorite : Icons.favorite_border,
                                     color: likedByMe ? Colors.red : null,
                                   ),
-                                  onPressed: linkId == 0 ? null : () => _toggleLike(linkId, index),
+                                    onPressed: (isGuest || linkId == 0) ? null : () => _toggleLike(linkId, index),
                                 ),
                               ],
                             ),

@@ -9,6 +9,8 @@ from email.mime.text import MIMEText
 from sqlalchemy import func, or_
 import secrets
 from urllib.parse import quote_plus
+from sqlalchemy.dialects.postgresql import TSVECTOR
+from sqlalchemy import text
 
 app = Flask(__name__)
 CORS(app)
@@ -28,7 +30,7 @@ def generate_verification_code() -> str:
     return f"{random.randint(100000, 999999)}"
 
 GMAIL_ADDRESS = "linkiz12321@gmail.com"
-GMAIL_APP_PASSWORD = "fhaq lcdq jiri ivcd"  # better to use env var in real app
+GMAIL_APP_PASSWORD = "fhaq lcdq jiri ivcd" 
 
 
 def send_verification_email(email: str, code: str):
@@ -105,6 +107,8 @@ class Link(db.Model):
     tags = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
+    search_vector = db.Column(TSVECTOR)
+
 def is_strong_password(p: str) -> bool:
     if not p or len(p) < 8:
         return False
@@ -153,7 +157,7 @@ def request_password_reset():
     user.password_reset_expires_at = expires_at
     db.session.commit()
 
-    base_url = os.getenv("PUBLIC_BASE_URL", "http://127.0.0.1:5000")
+    base_url = os.getenv("PUBLIC_BASE_URL", "http://44.222.98.94:5000")
     reset_link = f"{base_url}/reset-password?token={quote_plus(token)}"
 
     send_password_reset_email(email, reset_link)
@@ -504,7 +508,19 @@ def add_link():
         )
         db.session.add(new_link)
         db.session.commit()
-
+        # --- Update Postgres full-text search vector (requires new_link.id) ---
+        db.session.execute(
+            text("""
+                UPDATE links
+                SET search_vector =
+                    setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
+                    setweight(to_tsvector('english', coalesce(tags, '')), 'B') ||
+                    setweight(to_tsvector('english', coalesce(description, '')), 'C')
+                WHERE id = :id
+            """),
+            {"id": new_link.id}
+        )
+        db.session.commit()
         return jsonify({
             "success": True,
             "id": new_link.id,
@@ -632,20 +648,21 @@ def search():
     if not query:
         return jsonify(ok=True, results=[])
 
-    # Query base
-    results = Link.query.filter(
-        or_(
-            Link.title.ilike(f"%{query}%"),
-            Link.description.ilike(f"%{query}%"),
-            Link.url.ilike(f"%{query}%")
+    ts_query = func.plainto_tsquery("english", query)
+
+    results = (
+        db.session.query(
+            Link,
+            func.ts_rank(Link.search_vector, ts_query).label("rank")
         )
-    ).all()
+        .filter(Link.search_vector.op("@@")(ts_query))
+        .order_by(func.ts_rank(Link.search_vector, ts_query).desc())
+        .limit(50)
+        .all()
+    )
 
-    link_ids = [l.id for l in results]
-    if not link_ids:
-        return jsonify(ok=True, results=[])
+    link_ids = [l.id for l, _ in results]
 
-    # likes_count per link
     like_counts = dict(
         db.session.query(LinkLike.link_id, func.count(LinkLike.id))
         .filter(LinkLike.link_id.in_(link_ids))
@@ -653,24 +670,21 @@ def search():
         .all()
     )
 
-    # liked_by_me set
     liked_set = set()
     if viewer_user_id:
-        liked_set = set(
-            x[0] for x in db.session.query(LinkLike.link_id)
+        liked_set = {
+            x[0] for x in
+            db.session.query(LinkLike.link_id)
             .filter(
                 LinkLike.user_id == viewer_user_id,
                 LinkLike.link_id.in_(link_ids)
             )
             .all()
-        )
+        }
 
-    links = []
-    for link in results:
-        likes_count = int(like_counts.get(link.id, 0))
-        liked_by_me = (link.id in liked_set) if viewer_user_id else False
-
-        links.append({
+    output = []
+    for link, rank in results:
+        output.append({
             "id": link.id,
             "url": link.url,
             "title": link.title,
@@ -678,25 +692,13 @@ def search():
             "tags": link.tags,
             "created_at": link.created_at.isoformat(),
             "creator_id": link.creator_id,
-            "creator_username": link.user.username if link.user else None,
-            "likes_count": likes_count,
-            "liked_by_me": liked_by_me,
-
-            # used only for server-side sorting safely
-            "_created_at_dt": link.created_at,
+            "creator_username": link.user.username,
+            "likes_count": int(like_counts.get(link.id, 0)),
+            "liked_by_me": link.id in liked_set,
+            "rank": float(rank)
         })
 
-    # Sort: likes desc, then created_at desc (newest first)
-    links.sort(
-        key=lambda x: (x["likes_count"], x["_created_at_dt"]),
-        reverse=True
-    )
-
-    # remove internal helper
-    for x in links:
-        x.pop("_created_at_dt", None)
-
-    return jsonify(ok=True, results=links)
+    return jsonify(ok=True, results=output)
 
 # ---------------- VERIFY EMAIL ----------------
 
