@@ -89,6 +89,16 @@ class User(db.Model):
 
     links = db.relationship("Link", backref="user", lazy=True)
 
+link_categories = db.Table(
+    "link_categories",
+    db.Column("link_id", db.Integer, db.ForeignKey("links.id"), primary_key=True),
+    db.Column("category_id", db.Integer, db.ForeignKey("categories.id"), primary_key=True),
+)
+
+class Category(db.Model):
+    __tablename__ = "categories"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), unique=True, nullable=False)
 
 class Link(db.Model):
     __tablename__ = "links"
@@ -108,6 +118,8 @@ class Link(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     search_vector = db.Column(TSVECTOR)
+    # NEW
+    categories = db.relationship("Category", secondary=link_categories, lazy="subquery")
 
 def is_strong_password(p: str) -> bool:
     if not p or len(p) < 8:
@@ -157,14 +169,18 @@ def request_password_reset():
     user.password_reset_expires_at = expires_at
     db.session.commit()
 
-    base_url = os.getenv("PUBLIC_BASE_URL", "http://44.222.98.94:5000")
+    base_url = os.getenv("PUBLIC_BASE_URL", "http://127.0.0.1:5000")
     reset_link = f"{base_url}/reset-password?token={quote_plus(token)}"
 
     send_password_reset_email(email, reset_link)
 
     return jsonify(success=True, message="If the email exists, a reset link was sent."), 200
 
-
+@app.route("/categories", methods=["GET"])
+def list_categories():
+    cats = Category.query.order_by(Category.name.asc()).all()
+    return jsonify(ok=True, results=[{"id": c.id, "name": c.name} for c in cats])
+    
 @app.route("/reset-password", methods=["GET"])
 def reset_password_page():
     token = (request.args.get("token") or "").strip()
@@ -647,9 +663,9 @@ def search():
 
     if not query:
         return jsonify(ok=True, results=[])
-
+    print("SEARCH query:", query)
     ts_query = func.plainto_tsquery("english", query)
-
+    print(ts_query)
     results = (
         db.session.query(
             Link,
@@ -742,7 +758,138 @@ def verify():
         db.session.rollback()
         return jsonify({"success": False, "message": "Internal server error"}), 500
 
+# ---------------- MY LINKS (USER MANAGEMENT) ----------------
 
+@app.route("/my-links", methods=["GET"])
+def my_links():
+    user_id = request.args.get("user_id", type=int)
+    if not user_id:
+        return jsonify(ok=False, message="Missing user_id"), 400
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify(ok=False, message="User not found"), 404
+
+    # optional: require verified to manage
+    if not user.is_verified:
+        return jsonify(ok=False, message="User is not verified"), 403
+
+    links = (
+        Link.query
+        .filter_by(creator_id=user_id)
+        .order_by(Link.created_at.desc())
+        .all()
+    )
+
+    # likes count (optional, like you do in search)
+    link_ids = [l.id for l in links]
+    like_counts = {}
+    if link_ids:
+        like_counts = dict(
+            db.session.query(LinkLike.link_id, func.count(LinkLike.id))
+            .filter(LinkLike.link_id.in_(link_ids))
+            .group_by(LinkLike.link_id)
+            .all()
+        )
+
+    results = []
+    for link in links:
+        results.append({
+            "id": link.id,
+            "url": link.url,
+            "title": link.title,
+            "description": link.description,
+            "tags": link.tags,
+            "created_at": link.created_at.isoformat(),
+            "creator_id": link.creator_id,
+            "likes_count": int(like_counts.get(link.id, 0)),
+        })
+
+    return jsonify(ok=True, results=results)
+
+
+@app.route("/links/<int:link_id>", methods=["PUT"])
+def update_link(link_id):
+    data = request.get_json(silent=True) or {}
+    user_id = data.get("user_id")
+
+    if not user_id:
+        return jsonify(ok=False, message="Missing user_id"), 400
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify(ok=False, message="User not found"), 404
+    if not user.is_verified:
+        return jsonify(ok=False, message="User is not verified"), 403
+
+    link = Link.query.get(link_id)
+    if not link:
+        return jsonify(ok=False, message="Link not found"), 404
+
+    # security: only owner can edit
+    if link.creator_id != user_id:
+        return jsonify(ok=False, message="Not allowed"), 403
+
+    # allow updating fields
+    title = (data.get("title") or "").strip()
+    url = (data.get("url") or "").strip()
+    description = (data.get("description") or "").strip()
+    tags = (data.get("tags") or "").strip()
+
+    if url:
+        link.url = url
+    if title:
+        link.title = title
+
+    link.description = description or None
+    link.tags = tags or None
+
+    db.session.commit()
+
+    # update FTS vector too (like in add_link)
+    db.session.execute(
+        text("""
+            UPDATE links
+            SET search_vector =
+                setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
+                setweight(to_tsvector('english', coalesce(tags, '')), 'B') ||
+                setweight(to_tsvector('english', coalesce(description, '')), 'C')
+            WHERE id = :id
+        """),
+        {"id": link.id}
+    )
+    db.session.commit()
+
+    return jsonify(ok=True, message="Updated")
+
+
+@app.route("/links/<int:link_id>", methods=["DELETE"])
+def delete_link(link_id):
+    user_id = request.args.get("user_id", type=int)
+    if not user_id:
+        return jsonify(ok=False, message="Missing user_id"), 400
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify(ok=False, message="User not found"), 404
+    if not user.is_verified:
+        return jsonify(ok=False, message="User is not verified"), 403
+
+    link = Link.query.get(link_id)
+    if not link:
+        return jsonify(ok=False, message="Link not found"), 404
+
+    # security: only owner can delete
+    if link.creator_id != user_id:
+        return jsonify(ok=False, message="Not allowed"), 403
+
+    # delete likes first to avoid FK issues (depends on your FK settings)
+    LinkLike.query.filter_by(link_id=link_id).delete()
+
+    db.session.delete(link)
+    db.session.commit()
+
+    return jsonify(ok=True, message="Deleted")
 if __name__ == "__main__":
     init_db()
     app.run(host="0.0.0.0", port=5000, debug=True)

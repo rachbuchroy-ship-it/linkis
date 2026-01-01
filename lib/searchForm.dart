@@ -145,7 +145,7 @@ Future<void> _shareToWhatsApp(String title, String url) async {
         params['user_id'] = currentUserId.toString();
       }
 
-      final url = Uri.parse('http://127.0.0.1:5000/search').replace(
+      final url = Uri.parse('http://44.222.98.94:5000/search').replace(
         queryParameters: params,
       );
 
@@ -200,7 +200,7 @@ Future<void> _shareToWhatsApp(String title, String url) async {
     });
 
     try {
-      final url = Uri.parse('http://127.0.0.1:5000/links/$linkId/toggleLike');
+      final url = Uri.parse('http://44.222.98.94:5000/links/$linkId/toggleLike');
       final res = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},

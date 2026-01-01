@@ -34,7 +34,7 @@ class _VerifyEmailFormState extends State<VerifyEmailForm> {
   }
 
   Future<void> _resendVerificationCode() async {
-    final url = Uri.parse('http://127.0.0.1:5000/resendVerificationCode');
+    final url = Uri.parse('http://44.222.98.94:5000/resendVerificationCode');
     await http.post(
       url,
       headers: {'Content-Type': 'application/json'},
@@ -44,7 +44,7 @@ class _VerifyEmailFormState extends State<VerifyEmailForm> {
 
   Future<Map<String, dynamic>> _verifyEmailCode(
       String email, String code) async {
-    final url = Uri.parse('http://127.0.0.1:5000/verify');
+    final url = Uri.parse('http://44.222.98.94:5000/verify');
 
     try {
       final res = await http.post(
