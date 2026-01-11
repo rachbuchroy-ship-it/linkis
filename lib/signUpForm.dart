@@ -72,7 +72,7 @@ class _SignupFormState extends State<SignupForm> {
 Future<Map<String, dynamic>> submitCredentials(
     String username, String password, String email) async {
   
-  final url = Uri.parse('http://44.222.98.94:5000/signUp');
+  final url = Uri.parse('http://100.31.196.241:5000/signUp');
   // For Android emulator: use http://10.0.2.2:5000/signUp
 
   try {

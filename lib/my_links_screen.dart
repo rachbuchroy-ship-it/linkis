@@ -18,7 +18,7 @@ class _MyLinksScreenState extends State<MyLinksScreen> {
   List<dynamic> links = [];
 
   // change to your server base
-final String baseUrl = "http://44.222.98.94:5000";
+final String baseUrl = "http://100.31.196.241:5000";
 
   @override
   void initState() {

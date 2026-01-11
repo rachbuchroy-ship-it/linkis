@@ -8,7 +8,7 @@ import 'verifyEmailForm.dart';
 import 'searchForm.dart';
 import 'addLinkForm.dart';
 import 'settings_screen.dart';
-import 'my_links_screen.dart'; // <-- NEW
+import 'my_links_screen.dart'; 
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -50,6 +50,8 @@ class _HomePageState extends State<HomePage> {
   String? loggedInUsername;
   bool _sessionLoaded = false;
 
+  int _currentIndex = 0;
+
   bool get isLoggedIn => loggedInUserId != null;
 
   @override
@@ -58,127 +60,86 @@ class _HomePageState extends State<HomePage> {
     _loadSession();
   }
 
-  void _openAddLink() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => AddLinkForm(
-          loggedInUserId: loggedInUserId,
+  void _openLogin() {
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => Scaffold(
+        appBar: AppBar(title: const Text('Log in')),
+        body: Container(
+          decoration: BoxDecoration(
+            gradient: widget.themeController.spec.background,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: SingleChildScrollView(
+              child: LoginForm(
+                onLoginSuccess: (userId, email, username) async {
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setInt('user_id', userId);
+                  await prefs.setString('email', email);
+                  await prefs.setString('username', username);
+
+                  Navigator.pop(context); // close login screen
+                  await _loadSession();
+
+                  // optional: go to My Links after login
+                  setState(() {
+                    _currentIndex = isLoggedIn ? 2 : 0;
+                  });
+                },
+              ),
+            ),
+          ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
-  void _openSearch() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => SearchForm(userId: loggedInUserId),
+void _openSignup() {
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => Scaffold(
+        appBar: AppBar(title: const Text('Sign up')),
+        body: Container(
+          decoration: BoxDecoration(
+            gradient: widget.themeController.spec.background,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: SingleChildScrollView(
+              child: SignupForm(
+                onSignupSuccess: (email) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => VerifyEmailForm(
+                        email: email,
+                        onBack: () => Navigator.pop(context),
+                        onVerified: () {
+                          Navigator.pop(context); // close verify
+                          Navigator.pop(context); // close signup
+                        },
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   void _openSettings() {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => SettingsScreen(controller: widget.themeController),
-      ),
-    );
-  }
-
-  // ---------- NEW: OPEN MY LINKS ----------
-  void _openMyLinks() {
-    if (loggedInUserId == null) return;
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => MyLinksScreen(
-          userId: loggedInUserId!,
-          themeController: widget.themeController,
-        ),
-      ),
-    );
-  }
-
-  void _openSignUpOrLogin() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => SignUpOrLoginForm(
-          themeController: widget.themeController,
-          onBack: () => Navigator.pop(context),
-          onLogin: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => Scaffold(
-                  appBar: AppBar(title: const Text('Log in')),
-                  body: Container(
-                    decoration: BoxDecoration(
-                      gradient: widget.themeController.spec.background,
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: SingleChildScrollView(
-                        child: LoginForm(
-                          onLoginSuccess: (userId, email, username) async {
-                            final prefs = await SharedPreferences.getInstance();
-                            await prefs.setInt('user_id', userId);
-                            await prefs.setString('email', email);
-                            await prefs.setString('username', username);
-
-                            Navigator.pop(context); // close login
-                            Navigator.pop(context); // close chooser
-
-                            await _loadSession();
-                          },
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-          onSignup: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => Scaffold(
-                  appBar: AppBar(title: const Text('Sign up')),
-                  body: Container(
-                    decoration: BoxDecoration(
-                      gradient: widget.themeController.spec.background,
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: SingleChildScrollView(
-                        child: SignupForm(
-                          onSignupSuccess: (email) {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => VerifyEmailForm(
-                                  email: email,
-                                  onBack: () => Navigator.pop(context),
-                                  onVerified: () {
-                                    Navigator.pop(context); // close verify
-                                    Navigator.pop(context); // close signup
-                                  },
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
       ),
     );
   }
@@ -198,6 +159,7 @@ class _HomePageState extends State<HomePage> {
         loggedInUserId = null;
         loggedInEmail = null;
         loggedInUsername = null;
+        if (_currentIndex == 2) _currentIndex = 0; // if was on My Links
       }
       _sessionLoaded = true;
     });
@@ -205,7 +167,6 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
-
     await prefs.remove('user_id');
     await prefs.remove('email');
     await prefs.remove('username');
@@ -214,9 +175,8 @@ class _HomePageState extends State<HomePage> {
       loggedInUserId = null;
       loggedInEmail = null;
       loggedInUsername = null;
+      _currentIndex = 0;
     });
-
-    Navigator.popUntil(context, (route) => route.isFirst);
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Logged out')),
@@ -229,193 +189,91 @@ class _HomePageState extends State<HomePage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    return MenuForm(
-      isLoggedIn: isLoggedIn,
-      userId: loggedInUserId, // <-- NEW
-      username: loggedInUsername,
-      onSearch: _openSearch,
-      onAddLink: _openAddLink,
-      onMyLinks: _openMyLinks, // <-- NEW
-      onSignUpOrLogin: _openSignUpOrLogin,
-      onSettings: _openSettings,
-      onLogout: isLoggedIn ? logout : null,
-      themeController: widget.themeController,
-    );
-  }
-}
+    final spec = widget.themeController.spec;
 
-/// ---------------- MENU FORM ----------------
+    // Build pages list (My Links only if logged in)
+    final pages = <Widget>[
+      SearchForm(userId: loggedInUserId),
+      AddLinkForm(loggedInUserId: loggedInUserId),
+      if (isLoggedIn)
+        MyLinksScreen(
+          userId: loggedInUserId!,
+          themeController: widget.themeController,
+        ),
+      // Profile-like tab: login/logout
+      _AccountTab(
+        isLoggedIn: isLoggedIn,
+        username: loggedInUsername,
+        onOpenLogin: _openLogin,
+        onOpenSignup: _openSignup,
+        onLogout: logout,
+        onSettings: _openSettings,
+        themeController: widget.themeController,
+      ),
+    ];
 
-class MenuForm extends StatelessWidget {
-  final bool isLoggedIn;
-  final int? userId; // <-- NEW
-  final String? username;
+    // Build nav items aligned with pages
+    final items = <BottomNavigationBarItem>[
+      const BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
+      const BottomNavigationBarItem(icon: Icon(Icons.add_link), label: 'Add'),
+      if (isLoggedIn)
+        const BottomNavigationBarItem(
+          icon: Icon(Icons.bookmark),
+          label: 'My Links',
+        ),
+      const BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Account'),
+    ];
 
-  final VoidCallback onSearch;
-  final VoidCallback onAddLink;
-  final VoidCallback onMyLinks; // <-- NEW
-  final VoidCallback onSignUpOrLogin;
-  final VoidCallback onSettings;
-  final Future<void> Function()? onLogout;
-  final ThemeController themeController;
-
-  const MenuForm({
-    super.key,
-    required this.isLoggedIn,
-    required this.userId,
-    required this.username,
-    required this.onSearch,
-    required this.onAddLink,
-    required this.onMyLinks,
-    required this.onSignUpOrLogin,
-    required this.onSettings,
-    required this.themeController,
-    this.onLogout,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final spec = themeController.spec;
+    // If user logged out and My Links tab vanished, keep index safe
+    final maxIndex = items.length - 1;
+    if (_currentIndex > maxIndex) _currentIndex = maxIndex;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(isLoggedIn ? 'Hello, $username' : 'Choose an option'),
-      ),
       body: Container(
         decoration: BoxDecoration(gradient: spec.background),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: GridView.count(
-            crossAxisCount: 2,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            children: [
-              _MenuButton(
-                icon: Icons.search,
-                label: 'Search',
-                onTap: onSearch,
-                themeController: themeController,
-              ),
-              _MenuButton(
-                icon: Icons.group_add,
-                label: 'Add Link',
-                onTap: onAddLink,
-                themeController: themeController,
-              ),
-
-              // ---------- NEW: MY LINKS TILE (ONLY IF LOGGED IN) ----------
-              if (userId != null)
-                _MenuButton(
-                  icon: Icons.bookmark,
-                  label: 'My Links',
-                  onTap: onMyLinks,
-                  themeController: themeController,
-                ),
-
-              _MenuButton(
-                icon: Icons.person_add,
-                label: 'Sign Up or Log In',
-                onTap: onSignUpOrLogin,
-                themeController: themeController,
-              ),
-              _MenuButton(
-                icon: Icons.settings,
-                label: 'Settings',
-                onTap: onSettings,
-                themeController: themeController,
-              ),
-              if (isLoggedIn && onLogout != null)
-                _MenuButton(
-                  icon: Icons.logout,
-                  label: 'Log Out',
-                  onTap: () => onLogout!(),
-                  themeController: themeController,
-                ),
-            ],
-          ),
+        child: IndexedStack(
+          index: _currentIndex,
+          children: pages,
         ),
+      ),
+      bottomNavigationBar: BottomNavigationBar(
+        items: items, // ✅ REQUIRED
+        currentIndex: _currentIndex,
+        onTap: (i) => setState(() => _currentIndex = i),
+        type: BottomNavigationBarType.fixed,
       ),
     );
   }
 }
+class _AccountTab extends StatelessWidget {
+  final bool isLoggedIn;
+  final String? username;
 
-/// ---------------- SIGN UP OR LOGIN FORM ----------------
+  final VoidCallback onOpenLogin;
+  final VoidCallback onOpenSignup;
 
-class SignUpOrLoginForm extends StatelessWidget {
-  final ThemeController themeController;
-  final VoidCallback onBack;
-  final VoidCallback onLogin;
-  final VoidCallback onSignup;
-
-  const SignUpOrLoginForm({
-    super.key,
-    required this.themeController,
-    required this.onBack,
-    required this.onLogin,
-    required this.onSignup,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Choose an option'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: onBack,
-        ),
-      ),
-      body: Container(
-        decoration: BoxDecoration(gradient: themeController.spec.background),
-        padding: const EdgeInsets.all(16),
-        child: GridView.count(
-          crossAxisCount: 2,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          children: [
-            _MenuButton(
-              icon: Icons.account_circle,
-              label: 'log in',
-              onTap: onLogin,
-              themeController: themeController,
-            ),
-            _MenuButton(
-              icon: Icons.group_add,
-              label: 'sign up',
-              onTap: onSignup,
-              themeController: themeController,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// ---------------- MENU BUTTON ----------------
-
-class _MenuButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
+  final Future<void> Function() onLogout;
+  final VoidCallback onSettings;
   final ThemeController themeController;
 
-  const _MenuButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
+  const _AccountTab({
+    required this.isLoggedIn,
+    required this.username,
+    required this.onOpenLogin,
+    required this.onOpenSignup,
+    required this.onLogout,
+    required this.onSettings,
     required this.themeController,
-    super.key,
   });
 
   @override
   Widget build(BuildContext context) {
     final spec = themeController.spec;
 
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(18),
-      child: Ink(
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        margin: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),
           gradient: spec.tile,
@@ -428,27 +286,56 @@ class _MenuButton extends StatelessWidget {
             ),
           ],
         ),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 38, color: spec.onTile),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.person, size: 48, color: spec.onTile),
+            const SizedBox(height: 10),
+            Text(
+              isLoggedIn ? 'Logged in as $username' : 'Account',
+              style: TextStyle(
+                color: spec.onTile,
+                fontWeight: FontWeight.w600,
+                fontSize: 16,
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            if (!isLoggedIn) ...[
+              SizedBox(
+                child: TextButton(
+                  onPressed: onOpenLogin,
+                  child: const Text('Log in'),
+                ),
+              ),
+              
               const SizedBox(height: 10),
-              Text(
-                label,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: spec.onTile,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.2,
+              const SizedBox(height: 6),
+              TextButton(
+                onPressed: onOpenSignup,
+                child: const Text('Sign up'),
+              ),
+            ] else ...[
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => onLogout(),
+                  child: const Text('Log out'),
                 ),
               ),
             ],
-          ),
+
+            const SizedBox(height: 10),
+            TextButton(
+              onPressed: onSettings,
+              child: const Text('Settings'),
+            ),
+          ],
         ),
       ),
     );
   }
 }
+
+
 

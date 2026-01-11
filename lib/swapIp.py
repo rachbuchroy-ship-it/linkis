@@ -1,11 +1,9 @@
 import os
 import sys
 
-IP_LOCAL = "44.222.98.94"
-IP_REMOTE = "44.222.98.94"
 PLACEHOLDER = "__TEMP_IP__"
 
-def process_file(path, mode):
+def process_file(path, src_ip, dst_ip, mode):
     try:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -15,13 +13,18 @@ def process_file(path, mode):
     original = content
 
     if mode == "1":
-        content = content.replace(IP_LOCAL, IP_REMOTE)
+        # src → dst
+        content = content.replace(src_ip, dst_ip)
+
     elif mode == "2":
-        content = content.replace(IP_REMOTE, IP_LOCAL)
+        # dst → src
+        content = content.replace(dst_ip, src_ip)
+
     elif mode == "3":
-        content = content.replace(IP_LOCAL, PLACEHOLDER)
-        content = content.replace(IP_REMOTE, IP_LOCAL)
-        content = content.replace(PLACEHOLDER, IP_REMOTE)
+        # swap both ways safely
+        content = content.replace(src_ip, PLACEHOLDER)
+        content = content.replace(dst_ip, src_ip)
+        content = content.replace(PLACEHOLDER, dst_ip)
 
     if content != original:
         with open(path, "w", encoding="utf-8") as f:
@@ -35,9 +38,12 @@ def main():
 
     folder = sys.argv[1]
 
-    print("Choose switch mode:")
-    print("1 - 44.222.98.94 → 44.222.98.94")
-    print("2 - 44.222.98.94 → 44.222.98.94")
+    src_ip = input("Enter first IP: ").strip()
+    dst_ip = input("Enter second IP: ").strip()
+
+    print("\nChoose switch mode:")
+    print(f"1 - {src_ip} → {dst_ip}")
+    print(f"2 - {dst_ip} → {src_ip}")
     print("3 - Swap both ways")
 
     mode = input("Enter choice (1/2/3): ").strip()
@@ -49,9 +55,9 @@ def main():
     for root, _, files in os.walk(folder):
         for file in files:
             path = os.path.join(root, file)
-            process_file(path, mode)
+            process_file(path, src_ip, dst_ip, mode)
 
-    print("Done.")
+    print("\nDone.")
 
 if __name__ == "__main__":
     main()

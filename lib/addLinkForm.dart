@@ -3,9 +3,9 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 
 /// Change this depending on platform:
-/// - Web / Desktop: "http://44.222.98.94:5000"
+/// - Web / Desktop: "http://100.31.196.241:5000"
 /// - Android emulator: "http://10.0.2.2:5000"
-const String baseUrl = "http://44.222.98.94:5000";
+const String baseUrl = "http://100.31.196.241:5000";
 
 class AddLinkForm extends StatefulWidget {
   final int? loggedInUserId;
@@ -127,9 +127,7 @@ class _AddLinkFormState extends State<AddLinkForm> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text("add link"),
-      ),
+
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: SingleChildScrollView(

@@ -145,7 +145,7 @@ Future<void> _shareToWhatsApp(String title, String url) async {
         params['user_id'] = currentUserId.toString();
       }
 
-      final url = Uri.parse('http://44.222.98.94:5000/search').replace(
+      final url = Uri.parse('http://100.31.196.241:5000/search').replace(
         queryParameters: params,
       );
 
@@ -200,7 +200,7 @@ Future<void> _shareToWhatsApp(String title, String url) async {
     });
 
     try {
-      final url = Uri.parse('http://44.222.98.94:5000/links/$linkId/toggleLike');
+      final url = Uri.parse('http://100.31.196.241:5000/links/$linkId/toggleLike');
       final res = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
@@ -331,7 +331,6 @@ Future<void> _shareToWhatsApp(String title, String url) async {
     final showNoResults = !isLoading && errorMessage == null && searchResults.isEmpty;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Search')),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
