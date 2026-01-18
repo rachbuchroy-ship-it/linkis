@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart'; 
+import 'Config.dart';
 
 class SignupForm extends StatefulWidget {
   final void Function(String email) onSignupSuccess;
@@ -72,7 +73,7 @@ class _SignupFormState extends State<SignupForm> {
 Future<Map<String, dynamic>> submitCredentials(
     String username, String password, String email) async {
   
-  final url = Uri.parse('http://100.31.196.241:5000/signUp');
+  final url = Uri.http(IP_PORT, '/signUp');
   // For Android emulator: use http://10.0.2.2:5000/signUp
 
   try {

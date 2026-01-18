@@ -10,6 +10,8 @@ import 'addLinkForm.dart';
 import 'settings_screen.dart';
 import 'my_links_screen.dart'; 
 
+import 'Config.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final themeController = ThemeController();

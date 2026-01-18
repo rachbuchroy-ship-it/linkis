@@ -1,0 +1,28 @@
+flutter update:
+
+    #Generate html & javascript files
+    flutter pub get
+    flutter build web --release
+
+    #create new folder in ec2 and give it premisions
+    sudo mkdir -p /var/www/linkiz
+    sudo chown -R ubuntu:ubuntu /var/www/linkiz
+    sudo chmod -R 755 /var/www/linkiz
+
+    #transfer files to EC2
+    scp -i C:\Users\menas\Downloads\key.pem -r C:\linkis-royrachbuch\build\web\* ubuntu@100.31.196.241:/var/www/linkiz/
+
+Reload Nginx server
+    sudo nginx -t
+    sudo systemctl reload nginx
+
+    #Nginx configurations
+        /etc/ nginx/sites-available/linkiz
+
+pip and python in venv
+    /data/linkiz/venv/bin/python -m pip install -r requirements.txt
+
+    ./venv/bin/pip install -r requirements.txt
+
+Start server
+    sudo systemctl restart linkiz

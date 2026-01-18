@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'Config.dart';
 
 class SearchForm extends StatefulWidget {
   const SearchForm({super.key, this.userId}); // 👈 nullable
@@ -21,7 +22,6 @@ class _SearchFormState extends State<SearchForm> {
   bool isLoading = false;
   String? errorMessage;
   List<dynamic> searchResults = [];
-
 
 
   @override
@@ -107,7 +107,7 @@ Future<void> _shareToWhatsApp(String title, String url) async {
 
   final t = title.trim();
 
-  const ad = '\n\n—\nSaved with Linkis • Try it too';
+  const ad = '\n\n—\nSaved with Linkiz • Try it too';
   final text = (t.isEmpty ? fixed : '$t\n$fixed') + ad;
 
   final encoded = Uri.encodeComponent(text);
@@ -145,11 +145,17 @@ Future<void> _shareToWhatsApp(String title, String url) async {
         params['user_id'] = currentUserId.toString();
       }
 
-      final url = Uri.parse('http://100.31.196.241:5000/search').replace(
-        queryParameters: params,
+      final url = Uri.http(
+        IP_PORT,
+        '/search',
+        params,
       );
 
+
       final res = await http.get(url);
+      print('SEARCH URL: $url');
+      print('STATUS: ${res.statusCode}');
+      print('BODY: ${res.body}');
       if (!mounted) return;
 
       if (res.statusCode == 200) {
@@ -159,6 +165,14 @@ Future<void> _shareToWhatsApp(String title, String url) async {
             (decoded is Map<String, dynamic> && decoded['results'] is List)
                 ? List<dynamic>.from(decoded['results'] as List)
                 : <dynamic>[];
+
+        results.sort((a, b) {
+          final likesA =
+              int.tryParse((a['likes_count'] ?? 0).toString()) ?? 0;
+          final likesB =
+              int.tryParse((b['likes_count'] ?? 0).toString()) ?? 0;
+          return likesB.compareTo(likesA); // more likes first
+        });
 
         setState(() {
           searchResults = results;
@@ -200,7 +214,10 @@ Future<void> _shareToWhatsApp(String title, String url) async {
     });
 
     try {
-      final url = Uri.parse('http://100.31.196.241:5000/links/$linkId/toggleLike');
+      final url = Uri.http(
+        IP_PORT,
+        '/links/$linkId/toggleLike',
+      );
       final res = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
@@ -377,6 +394,13 @@ Future<void> _shareToWhatsApp(String title, String url) async {
                         final likesCount =
                             int.tryParse((map['likes_count'] ?? 0).toString()) ?? 0;
                         final likedByMe = map['liked_by_me'] == true;
+                        final semanticScore = (map['semantic_score'] is num)
+                            ? (map['semantic_score'] as num).toDouble()
+                            : double.tryParse((map['semantic_score'] ?? '').toString());
+
+                        final ftsRank = (map['rank'] is num)
+                            ? (map['rank'] as num).toDouble()
+                            : double.tryParse((map['rank'] ?? '').toString());
 
                         final idRaw = map['id'];
                         final linkId =
@@ -407,6 +431,13 @@ Future<void> _shareToWhatsApp(String title, String url) async {
                                   'By: ${creator.isEmpty ? '(unknown)' : creator} • $createdAt',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'semantic: ${semanticScore?.toStringAsFixed(3) ?? '-'} • fts: ${ftsRank?.toStringAsFixed(3) ?? '-'}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 12, color: Colors.grey),
                                 ),
                               ],
                             ),

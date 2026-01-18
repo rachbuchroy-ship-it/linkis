@@ -1,7 +1,11 @@
 import os
 import sys
 
+<<<<<<< HEAD
 PLACEHOLDER = "__TEMP_IP__"
+=======
+PLACEHOLDER = "127.0.0.1"
+>>>>>>> d0fd5e4 (search update)
 
 def process_file(path, src_ip, dst_ip, mode):
     try:

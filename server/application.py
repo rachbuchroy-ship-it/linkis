@@ -11,6 +11,8 @@ import secrets
 from urllib.parse import quote_plus
 from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy import text
+import time
+from sentence_transformers import SentenceTransformer, util
 
 app = Flask(__name__)
 CORS(app)
@@ -23,6 +25,21 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
+
+# ---------------- SEMANTIC SEARCH (EMBEDDINGS) ----------------
+EMBED_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+print("Loading embedding model...", flush=True)
+embed_model = SentenceTransformer(EMBED_MODEL_NAME)
+print("Embedding model loaded.", flush=True)
+
+def _link_text_for_embedding(link: "Link") -> str:
+    parts = [
+        (link.title or "").strip(),
+        (link.description or "").strip(),
+        (link.tags or "").strip(),
+    ]
+    return " | ".join([p for p in parts if p])
+
 
 # ---------------- EMAIL / VERIFICATION ----------------
 
@@ -657,37 +674,60 @@ def sign_up():
 # ---------------- SEARCH ----------------
 
 @app.route("/search", methods=["GET"])
+@app.route("/search", methods=["GET"])
 def search():
     query = (request.args.get("query") or "").strip()
     viewer_user_id = request.args.get("user_id", type=int)
 
     if not query:
         return jsonify(ok=True, results=[])
-    print("SEARCH query:", query)
+
+    t0 = time.time()
+    print("\n================= SEARCH =================", flush=True)
+    print(f"QUERY: {query!r} | viewer_user_id={viewer_user_id}", flush=True)
+
+    # ---- Step 1: Candidate retrieval (FTS) ----
+    # IMPORTANT: fetch more candidates and then semantic re-rank
     ts_query = func.plainto_tsquery("english", query)
-    print(ts_query)
-    results = (
+
+    fts_results = (
         db.session.query(
             Link,
             func.ts_rank(Link.search_vector, ts_query).label("rank")
         )
         .filter(Link.search_vector.op("@@")(ts_query))
         .order_by(func.ts_rank(Link.search_vector, ts_query).desc())
-        .limit(50)
+        .limit(200)
         .all()
     )
 
-    link_ids = [l.id for l, _ in results]
+    print(f"FTS candidates: {len(fts_results)}", flush=True)
 
-    like_counts = dict(
-        db.session.query(LinkLike.link_id, func.count(LinkLike.id))
-        .filter(LinkLike.link_id.in_(link_ids))
-        .group_by(LinkLike.link_id)
-        .all()
-    )
+    # Fallback for Hebrew / when FTS returns nothing:
+    if not fts_results:
+        print("FTS empty -> fallback to latest 200 links", flush=True)
+        fts_results = (
+            db.session.query(Link, text("0.0 as rank"))
+            .order_by(Link.created_at.desc())
+            .limit(200)
+            .all()
+        )
+
+    links = [l for (l, _) in fts_results]
+    link_ids = [l.id for l in links]
+
+    # ---- Step 2: Likes info ----
+    like_counts = {}
+    if link_ids:
+        like_counts = dict(
+            db.session.query(LinkLike.link_id, func.count(LinkLike.id))
+            .filter(LinkLike.link_id.in_(link_ids))
+            .group_by(LinkLike.link_id)
+            .all()
+        )
 
     liked_set = set()
-    if viewer_user_id:
+    if viewer_user_id and link_ids:
         liked_set = {
             x[0] for x in
             db.session.query(LinkLike.link_id)
@@ -698,8 +738,30 @@ def search():
             .all()
         }
 
+    # ---- Step 3: Semantic scoring ----
+    texts = [_link_text_for_embedding(l) for l in links]
+
+    t_emb0 = time.time()
+    q_emb = embed_model.encode(query, convert_to_tensor=True, normalize_embeddings=True)
+    c_emb = embed_model.encode(texts, convert_to_tensor=True, normalize_embeddings=True)
+    semantic_scores = util.cos_sim(q_emb, c_emb)[0].cpu().numpy()
+    print(f"Embeddings+sim time: {time.time() - t_emb0:.2f}s", flush=True)
+
+    # ---- Step 4: Merge + sort ----
+    merged = []
+    for (link, rank), sem_score, cand_text in zip(fts_results, semantic_scores, texts):
+        merged.append((link, float(rank), float(sem_score), cand_text))
+
+    merged.sort(key=lambda x: (x[2], x[1]), reverse=True)  # semantic desc, then fts rank desc
+
+    # ---- Debug print: show top candidates ----
+    print("Top candidates (after semantic sort):", flush=True)
+    for i, (link, fts_rank, sem, cand_text) in enumerate(merged[:20], start=1):
+        print(f"{i:02d}) sem={sem:.4f} | fts={fts_rank:.4f} | {cand_text}", flush=True)
+
+    # ---- Step 5: Build output ----
     output = []
-    for link, rank in results:
+    for link, fts_rank, sem_score, _ in merged[:50]:
         output.append({
             "id": link.id,
             "url": link.url,
@@ -711,8 +773,16 @@ def search():
             "creator_username": link.user.username,
             "likes_count": int(like_counts.get(link.id, 0)),
             "liked_by_me": link.id in liked_set,
-            "rank": float(rank)
+
+            # keep existing field
+            "rank": float(fts_rank),
+
+            # NEW: semantic similarity
+            "semantic_score": float(sem_score),
         })
+
+    print(f"SEARCH total time: {time.time() - t0:.2f}s | returned={len(output)}", flush=True)
+    print("==========================================\n", flush=True)
 
     return jsonify(ok=True, results=output)
 

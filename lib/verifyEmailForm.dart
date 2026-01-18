@@ -3,6 +3,8 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'Config.dart';
+
 /// ---------------- VERIFY EMAIL FORM ----------------
 
 class VerifyEmailForm extends StatefulWidget {
@@ -34,7 +36,7 @@ class _VerifyEmailFormState extends State<VerifyEmailForm> {
   }
 
   Future<void> _resendVerificationCode() async {
-    final url = Uri.parse('http://100.31.196.241:5000/resendVerificationCode');
+    final url = Uri.http(IP_PORT, '/resendVerificationCode');
     await http.post(
       url,
       headers: {'Content-Type': 'application/json'},
@@ -44,7 +46,7 @@ class _VerifyEmailFormState extends State<VerifyEmailForm> {
 
   Future<Map<String, dynamic>> _verifyEmailCode(
       String email, String code) async {
-    final url = Uri.parse('http://100.31.196.241:5000/verify');
+    final url = Uri.http(IP_PORT, '/verify');
 
     try {
       final res = await http.post(

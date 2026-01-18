@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
+import 'Config.dart';
+
 /// Change this depending on platform:
-/// - Web / Desktop: "http://100.31.196.241:5000"
+/// - Web / Desktop: "http://127.0.0.1:5000"
 /// - Android emulator: "http://10.0.2.2:5000"
-const String baseUrl = "http://100.31.196.241:5000";
 
 class AddLinkForm extends StatefulWidget {
   final int? loggedInUserId;
@@ -79,7 +80,7 @@ class _AddLinkFormState extends State<AddLinkForm> {
 
     try {
       final res = await http.post(
-        Uri.parse('$baseUrl/links'),
+        Uri.http(IP_PORT, '/links'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'url': url,

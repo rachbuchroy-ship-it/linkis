@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'main.dart' show ThemeController;
 import 'package:linkis/theme_controller.dart';
+import 'Config.dart';
 
 class MyLinksScreen extends StatefulWidget {
   final int userId;
@@ -18,7 +19,7 @@ class _MyLinksScreenState extends State<MyLinksScreen> {
   List<dynamic> links = [];
 
   // change to your server base
-final String baseUrl = "http://100.31.196.241:5000";
+final Uri baseUri = Uri.http(IP_PORT, '');
 
   @override
   void initState() {
@@ -29,7 +30,10 @@ final String baseUrl = "http://100.31.196.241:5000";
  Future<void> fetchMyLinks() async {
   setState(() => loading = true);
 
-  final uri = Uri.parse("$baseUrl/my-links?user_id=${widget.userId}");
+  final uri = baseUri.replace(
+  path: '/my-links',
+  queryParameters: {'user_id': widget.userId.toString()},
+  );
   final res = await http.get(uri);
 
   // Debug: see what you're actually getting
@@ -63,7 +67,10 @@ final String baseUrl = "http://100.31.196.241:5000";
 }
 
   Future<void> deleteLink(int linkId) async {
-    final uri = Uri.parse("$baseUrl/links/$linkId?user_id=${widget.userId}");
+    final uri = baseUri.replace(
+      path: '/links/$linkId',
+      queryParameters: {'user_id': widget.userId.toString()},
+    );
     final res = await http.delete(uri);
     final data = jsonDecode(res.body);
 
@@ -199,7 +206,7 @@ Future<void> confirmDelete(int linkId) async {
     required String description,
     required String tags,
   }) async {
-    final uri = Uri.parse("$baseUrl/links/$linkId");
+    final uri = baseUri.replace(path: '/links/$linkId');
     final body = jsonEncode({
       "user_id": widget.userId,
       "title": title,

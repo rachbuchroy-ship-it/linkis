@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 import 'package:linkis/theme_controller.dart';
+import 'Config.dart';
+
+
 // or whatever file contains ThemeController, AppThemeId, AppThemes
 
 class SettingsScreen extends StatelessWidget {

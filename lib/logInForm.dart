@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
+import 'Config.dart';
 
 class LoginForm extends StatefulWidget {
   final void Function(int userId, String email, String username) onLoginSuccess;
@@ -30,7 +31,7 @@ class _LoginFormState extends State<LoginForm> {
   }
 
   Future<Map<String, dynamic>> _login(String email, String password) async {
-    final url = Uri.parse('http://100.31.196.241:5000/login');
+    final url = Uri.http(IP_PORT, '/login');
 
     try {
       final res = await http.post(
@@ -62,7 +63,7 @@ class _LoginFormState extends State<LoginForm> {
   }
 
 Future<Map<String, dynamic>> _requestPasswordResetLink(String email) async {
-  final url = Uri.parse('http://100.31.196.241:5000/requestPasswordReset');
+  final url = Uri.http(IP_PORT, '/requestPasswordReset');
 
   try {
     final res = await http.post(
