@@ -1,0 +1,3 @@
+scp -i "C:\Users\User\OneDrive\שולחן העבודה\server\ubuntu-key.pem" `
+"C:\Users\User\linkis\server\application.py" `
+ubuntu@44.222.98.94:/opt/linkis-backend/application.py
