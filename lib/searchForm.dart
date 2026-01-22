@@ -121,6 +121,30 @@ Future<void> _shareToWhatsApp(String title, String url) async {
   }
 }
 
+  Future<void> _syncUserLikes() async {
+      if (isGuest || searchResults.isEmpty) return;
+
+      try {
+        final url = Uri.http(IP_PORT, '/users/$currentUserId/liked-links');
+        final res = await http.get(url);
+
+        if (res.statusCode == 200) {
+          final List<dynamic> likedIds = jsonDecode(res.body);
+          
+          setState(() {
+            for (var i = 0; i < searchResults.length; i++) {
+              final idRaw = searchResults[i]['id'];
+              final id = (idRaw is int) ? idRaw : int.tryParse('$idRaw') ?? 0;
+              
+              searchResults[i]['liked_by_me'] = likedIds.contains(id);
+            }
+          });
+        }
+      } catch (e) {
+        print("Error checking user likes: $e");
+      }
+    }
+
   Future<void> _onSearch() async {
     final query = linkSearchName.text.trim();
 
@@ -161,17 +185,19 @@ Future<void> _shareToWhatsApp(String title, String url) async {
       if (res.statusCode == 200) {
         final decoded = jsonDecode(res.body);
 
-        final List<dynamic> results =
-            (decoded is Map<String, dynamic> && decoded['results'] is List)
-                ? List<dynamic>.from(decoded['results'] as List)
-                : <dynamic>[];
+        List<dynamic> results;
+        if (decoded is List) {
+          results = decoded;
+        } else if (decoded is Map<String, dynamic> && decoded['results'] is List) {
+          results = List<dynamic>.from(decoded['results']);
+        } else {
+          results = [];
+        }
 
         results.sort((a, b) {
-          final likesA =
-              int.tryParse((a['likes_count'] ?? 0).toString()) ?? 0;
-          final likesB =
-              int.tryParse((b['likes_count'] ?? 0).toString()) ?? 0;
-          return likesB.compareTo(likesA); // more likes first
+          final likesA = int.tryParse((a['likes_count'] ?? 0).toString()) ?? 0;
+          final likesB = int.tryParse((b['likes_count'] ?? 0).toString()) ?? 0;
+          return likesB.compareTo(likesA); 
         });
 
         setState(() {
@@ -179,6 +205,7 @@ Future<void> _shareToWhatsApp(String title, String url) async {
           isLoading = false;
           errorMessage = null;
         });
+        _syncUserLikes();
       } else {
         setState(() {
           isLoading = false;
@@ -197,20 +224,12 @@ Future<void> _shareToWhatsApp(String title, String url) async {
   }
 
   Future<void> _toggleLike(int linkId, int index) async {
-    final current = Map<String, dynamic>.from(searchResults[index] as Map);
-
-    final bool oldLiked = current['liked_by_me'] == true;
-    final int oldCount =
-        int.tryParse((current['likes_count'] ?? 0).toString()) ?? 0;
-
-    // optimistic update
-    final bool newLiked = !oldLiked;
-    final int newCount = newLiked ? (oldCount + 1) : (oldCount > 0 ? oldCount - 1 : 0);
+    final oldLiked = searchResults[index]['liked_by_me'] == true;
+    final oldCount = int.tryParse((searchResults[index]['likes_count'] ?? 0).toString()) ?? 0;
 
     setState(() {
-      current['liked_by_me'] = newLiked;
-      current['likes_count'] = newCount;
-      searchResults[index] = current;
+      searchResults[index]['liked_by_me'] = !oldLiked;
+      searchResults[index]['likes_count'] = !oldLiked ? (oldCount + 1) : (oldCount > 0 ? oldCount - 1 : 0);
     });
 
     try {
@@ -229,17 +248,16 @@ Future<void> _shareToWhatsApp(String title, String url) async {
       if (res.statusCode == 200) {
         final decoded = jsonDecode(res.body);
         setState(() {
-          current['liked_by_me'] = decoded['liked'] == true;
-          current['likes_count'] =
-              int.tryParse((decoded['likes_count'] ?? 0).toString()) ?? 0;
-          searchResults[index] = current;
+          searchResults[index]['liked_by_me'] = decoded['liked'] ?? !oldLiked;
+          
+          if (decoded['likes_count'] != null) {
+            searchResults[index]['likes_count'] = int.tryParse(decoded['likes_count'].toString()) ?? 0;
+          }
         });
       } else {
-        // rollback
         setState(() {
-          current['liked_by_me'] = oldLiked;
-          current['likes_count'] = oldCount;
-          searchResults[index] = current;
+          searchResults[index]['liked_by_me'] = oldLiked;
+          searchResults[index]['likes_count'] = oldCount;
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Like failed (HTTP ${res.statusCode})')),
@@ -247,11 +265,9 @@ Future<void> _shareToWhatsApp(String title, String url) async {
       }
     } catch (e) {
       if (!mounted) return;
-      // rollback
       setState(() {
-        current['liked_by_me'] = oldLiked;
-        current['likes_count'] = oldCount;
-        searchResults[index] = current;
+        searchResults[index]['liked_by_me'] = oldLiked;
+        searchResults[index]['likes_count'] = oldCount;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Like error: $e')),
@@ -383,29 +399,22 @@ Future<void> _shareToWhatsApp(String title, String url) async {
                   : ListView.builder(
                       itemCount: searchResults.length,
                       itemBuilder: (context, index) {
-                        final item = searchResults[index];
-                        final map = (item is Map) ? item : const {};
+                      final item = searchResults[index];
+                      final map = Map<String, dynamic>.from(item is Map ? item : {});
 
-                        final title = (map['title'] ?? '').toString();
-                        final url = (map['url'] ?? '').toString();
-                        final creator = (map['creator_username'] ?? '').toString().trim();
-                        final createdAt = _formatIsoDate(map['created_at']);
+                      map['liked_by_me'] ??= false; 
 
-                        final likesCount =
-                            int.tryParse((map['likes_count'] ?? 0).toString()) ?? 0;
-                        final likedByMe = map['liked_by_me'] == true;
-                        final semanticScore = (map['semantic_score'] is num)
-                            ? (map['semantic_score'] as num).toDouble()
-                            : double.tryParse((map['semantic_score'] ?? '').toString());
-
-                        final ftsRank = (map['rank'] is num)
-                            ? (map['rank'] as num).toDouble()
-                            : double.tryParse((map['rank'] ?? '').toString());
-
-                        final idRaw = map['id'];
-                        final linkId =
-                            (idRaw is int) ? idRaw : int.tryParse('$idRaw') ?? 0;
-
+                      final title = (map['title'] ?? '').toString();
+                      final url = (map['url'] ?? '').toString();
+                      final creator = (map['creator_username'] ?? '').toString().trim();
+                      final createdAt = _formatIsoDate(map['created_at']);
+                      final likesCount = int.tryParse((map['likes_count'] ?? 0).toString()) ?? 0;
+                      final likedByMe = map['liked_by_me'] == true;
+                      final score = (map['score'] is num) 
+                          ? (map['score'] as num).toDouble() 
+                          : double.tryParse((map['score'] ?? '').toString());
+                      final idRaw = map['id'];
+                      final linkId = (idRaw is int) ? idRaw : int.tryParse('$idRaw') ?? 0;
                         return Card(
                           child: ListTile(
                             title: Text(title.trim().isEmpty ? '(no title)' : title),
@@ -434,7 +443,7 @@ Future<void> _shareToWhatsApp(String title, String url) async {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  'semantic: ${semanticScore?.toStringAsFixed(3) ?? '-'} • fts: ${ftsRank?.toStringAsFixed(3) ?? '-'}',
+                                  'Score: ${score?.toStringAsFixed(3) ?? '-'}',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(fontSize: 12, color: Colors.grey),
@@ -452,8 +461,10 @@ Future<void> _shareToWhatsApp(String title, String url) async {
                                     likedByMe ? Icons.favorite : Icons.favorite_border,
                                     color: likedByMe ? Colors.red : null,
                                   ),
-                                    onPressed: (isGuest || linkId == 0) ? null : () => _toggleLike(linkId, index),
-                                ),
+                                    onPressed: (isGuest || linkId == 0) 
+                                      ? null 
+                                      : () => _toggleLike(linkId, index),
+                                  ),
                               ],
                             ),
 

@@ -1,6 +1,7 @@
 flutter update:
 
     #Generate html & javascript files
+    flutter clean
     flutter pub get
     flutter build web --release
 
@@ -10,7 +11,7 @@ flutter update:
     sudo chmod -R 755 /var/www/linkiz
 
     #transfer files to EC2
-    scp -i C:\Users\menas\Downloads\key.pem -r C:\linkis-royrachbuch\build\web\* ubuntu@100.31.196.241:/var/www/linkiz/
+        ssh -i C:\Users\menas\Downloads\key.pem ubuntu@100.31.196.241 "rm -rf /var/www/linkiz/*" && scp -i C:\Users\menas\Downloads\key.pem -r C:\linkis-royrachbuch\build\web\* ubuntu@100.31.196.241:/var/www/linkiz/
 
 Reload Nginx server
     sudo nginx -t
@@ -21,7 +22,6 @@ Reload Nginx server
 
 pip and python in venv
     /data/linkiz/venv/bin/python -m pip install -r requirements.txt
-
     ./venv/bin/pip install -r requirements.txt
 
 Start server

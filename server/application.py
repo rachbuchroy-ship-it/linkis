@@ -11,8 +11,17 @@ import secrets
 from urllib.parse import quote_plus
 from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy import text
-import time
-from sentence_transformers import SentenceTransformer, util
+from rank_bm25 import BM25Okapi 
+from pydantic import BaseModel, ValidationError
+from typing import List
+import cohere
+import json
+
+# ---------------- COHERE API KEY ----------------
+COHERE_API_KEY = os.getenv("COHERE_API_KEY", "").strip()
+COHERE_RERANK_MODEL = os.getenv("COHERE_RERANK_MODEL", "rerank-v3.5")
+
+co = cohere.Client(COHERE_API_KEY)  # Initialize Cohere client
 
 app = Flask(__name__)
 CORS(app)
@@ -25,22 +34,6 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
-
-# ---------------- SEMANTIC SEARCH (EMBEDDINGS) ----------------
-EMBED_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-print("Loading embedding model...", flush=True)
-embed_model = SentenceTransformer(EMBED_MODEL_NAME)
-print("Embedding model loaded.", flush=True)
-
-def _link_text_for_embedding(link: "Link") -> str:
-    parts = [
-        (link.title or "").strip(),
-        (link.description or "").strip(),
-        (link.tags or "").strip(),
-    ]
-    return " | ".join([p for p in parts if p])
-
-
 # ---------------- EMAIL / VERIFICATION ----------------
 
 def generate_verification_code() -> str:
@@ -422,47 +415,84 @@ def reset_password_submit():
     </html>
     """
 
-# ---------------- TOGGLE LIKE ----------------
+# ---------------- USER LIKE ----------------
+@app.route("/users/<int:user_id>/liked-links", methods=["GET"])
+def get_user_likes(user_id):
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify(success=False, message="User not found"), 404
+        
+        liked_links = LinkLike.query.filter_by(user_id=user_id).all()
+        
+        liked_link_ids = [link.link_id for link in liked_links]
+        
+        return jsonify(liked_link_ids), 200
+    
+    except Exception as e:
+        print(f"Error retrieving liked links for user {user_id}: {e}")
+        return jsonify(success=False, message="Internal server error"), 500
 
+
+# ---------------- TOGGLE LIKE ----------------
 @app.route("/links/<int:link_id>/toggleLike", methods=["POST"])
 def toggle_like(link_id):
+    print(f"Request received for link_id: {link_id}")
+
     data = request.get_json(silent=True) or {}
+    print(f"Received data: {data}")
+
     user_id = data.get("user_id")
+    print(f"Extracted user_id: {user_id}")
 
     if not user_id:
+        print("user_id is missing")
         return jsonify(success=False, message="Missing user_id"), 400
 
     user = User.query.get(user_id)
+    print(f"Fetched user: {user}")
+
     if not user:
+        print(f"User with id {user_id} not found")
         return jsonify(success=False, message="User not found"), 404
 
     if not user.is_verified:
+        print(f"User with id {user_id} is not verified")
         return jsonify(success=False, message="User is not verified"), 403
 
     link = Link.query.get(link_id)
+    print(f"Fetched link: {link}")
+
     if not link:
+        print(f"Link with id {link_id} not found")
         return jsonify(success=False, message="Link not found"), 404
 
     try:
         existing = LinkLike.query.filter_by(user_id=user_id, link_id=link_id).first()
+        print(f"Existing like: {existing}")
 
         if existing:
+            print(f"Found existing like, deleting it")
             db.session.delete(existing)
             liked = False
         else:
+            print(f"No existing like found, adding new like")
             db.session.add(LinkLike(user_id=user_id, link_id=link_id))
             liked = True
 
         db.session.commit()
+        print(f"Database committed successfully")
 
         likes_count = LinkLike.query.filter_by(link_id=link_id).count()
+        print(f"Likes count for link_id {link_id}: {likes_count}")
 
         return jsonify(success=True, liked=liked, likes_count=likes_count), 200
 
     except Exception as e:
-        print("Error toggling like:", e)
+        print(f"Error toggling like: {e}")
         db.session.rollback()
         return jsonify(success=False, message="Internal server error"), 500
+
 
 # ---------------- LOGIN ----------------
 
@@ -673,118 +703,139 @@ def sign_up():
 
 # ---------------- SEARCH ----------------
 
-@app.route("/search", methods=["GET"])
-@app.route("/search", methods=["GET"])
-def search():
-    query = (request.args.get("query") or "").strip()
-    viewer_user_id = request.args.get("user_id", type=int)
+class QueryRequest(BaseModel):
+    q: str
+    k: int = 5
+    n: int = 50
 
-    if not query:
-        return jsonify(ok=True, results=[])
+# ---------------- Helper Functions ----------------
+from rank_bm25 import BM25Okapi
+def bm25_retriever(query: str, top_n: int = 50): # 'for futhere usege
+    # Split query into tokens
+    query_tokens = query.lower().split()
 
-    t0 = time.time()
-    print("\n================= SEARCH =================", flush=True)
-    print(f"QUERY: {query!r} | viewer_user_id={viewer_user_id}", flush=True)
+    # Query the database
+    session = db.session
+    links = session.query(Link).all()   # Retrieve all links from the database
+    print(f"Retrieved {len(links)} links from the database.")
+    
+    # Tokenize the titles of all links
+    documents = []
+    for link in links:
+        title_tokens = link.title.lower().split()  # Tokenize only the title
+        documents.append(title_tokens)
 
-    # ---- Step 1: Candidate retrieval (FTS) ----
-    # IMPORTANT: fetch more candidates and then semantic re-rank
-    ts_query = func.plainto_tsquery("english", query)
+    # Create BM25 model
+    bm25 = BM25Okapi(documents)
 
-    fts_results = (
-        db.session.query(
-            Link,
-            func.ts_rank(Link.search_vector, ts_query).label("rank")
-        )
-        .filter(Link.search_vector.op("@@")(ts_query))
-        .order_by(func.ts_rank(Link.search_vector, ts_query).desc())
-        .limit(200)
-        .all()
-    )
+    # Calculate scores for all documents
+    scores = bm25.get_scores(query_tokens)
 
-    print(f"FTS candidates: {len(fts_results)}", flush=True)
-
-    # Fallback for Hebrew / when FTS returns nothing:
-    if not fts_results:
-        print("FTS empty -> fallback to latest 200 links", flush=True)
-        fts_results = (
-            db.session.query(Link, text("0.0 as rank"))
-            .order_by(Link.created_at.desc())
-            .limit(200)
-            .all()
-        )
-
-    links = [l for (l, _) in fts_results]
-    link_ids = [l.id for l in links]
-
-    # ---- Step 2: Likes info ----
-    like_counts = {}
-    if link_ids:
-        like_counts = dict(
-            db.session.query(LinkLike.link_id, func.count(LinkLike.id))
-            .filter(LinkLike.link_id.in_(link_ids))
-            .group_by(LinkLike.link_id)
-            .all()
-        )
-
-    liked_set = set()
-    if viewer_user_id and link_ids:
-        liked_set = {
-            x[0] for x in
-            db.session.query(LinkLike.link_id)
-            .filter(
-                LinkLike.user_id == viewer_user_id,
-                LinkLike.link_id.in_(link_ids)
-            )
-            .all()
-        }
-
-    # ---- Step 3: Semantic scoring ----
-    texts = [_link_text_for_embedding(l) for l in links]
-
-    t_emb0 = time.time()
-    q_emb = embed_model.encode(query, convert_to_tensor=True, normalize_embeddings=True)
-    c_emb = embed_model.encode(texts, convert_to_tensor=True, normalize_embeddings=True)
-    semantic_scores = util.cos_sim(q_emb, c_emb)[0].cpu().numpy()
-    print(f"Embeddings+sim time: {time.time() - t_emb0:.2f}s", flush=True)
-
-    # ---- Step 4: Merge + sort ----
-    merged = []
-    for (link, rank), sem_score, cand_text in zip(fts_results, semantic_scores, texts):
-        merged.append((link, float(rank), float(sem_score), cand_text))
-
-    merged.sort(key=lambda x: (x[2], x[1]), reverse=True)  # semantic desc, then fts rank desc
-
-    # ---- Debug print: show top candidates ----
-    print("Top candidates (after semantic sort):", flush=True)
-    for i, (link, fts_rank, sem, cand_text) in enumerate(merged[:20], start=1):
-        print(f"{i:02d}) sem={sem:.4f} | fts={fts_rank:.4f} | {cand_text}", flush=True)
-
-    # ---- Step 5: Build output ----
-    output = []
-    for link, fts_rank, sem_score, _ in merged[:50]:
-        output.append({
+    # Prepare the results
+    results = []
+    for i, link in enumerate(links):
+        results.append({
             "id": link.id,
-            "url": link.url,
             "title": link.title,
             "description": link.description,
-            "tags": link.tags,
-            "created_at": link.created_at.isoformat(),
-            "creator_id": link.creator_id,
-            "creator_username": link.user.username,
-            "likes_count": int(like_counts.get(link.id, 0)),
-            "liked_by_me": link.id in liked_set,
-
-            # keep existing field
-            "rank": float(fts_rank),
-
-            # NEW: semantic similarity
-            "semantic_score": float(sem_score),
+            "score": scores[i]
         })
 
-    print(f"SEARCH total time: {time.time() - t0:.2f}s | returned={len(output)}", flush=True)
-    print("==========================================\n", flush=True)
+    # Sort results by score (highest to lowest)
+    results = sorted(results, key=lambda x: x['score'], reverse=True)[:top_n]
+    print(f"Top {top_n} results based on BM25 scores: {results}")
 
-    return jsonify(ok=True, results=output)
+    return results
+def rerank_with_cohere(query: str, documents: List[dict], model="rerank-v3.5"):
+    if not documents:
+        print("No documents to rerank.")
+        return []
+
+    texts = [f"{doc['title']}" for doc in documents] 
+
+    print(f"[COHERE] Sending {len(texts)} documents to rerank...")
+    response = co.rerank(model=model, query=query, documents=texts)
+    print("[COHERE] Raw response:", response)
+
+    reranked_results = []
+
+    for item in response.results:
+        original_doc = documents[item.index]
+        reranked_results.append({
+            "id": str(original_doc["id"]), 
+            "title": original_doc["title"],
+            "score": float(item.relevance_score),
+        })
+
+    print("[COHERE] Reranked results (top 10):", reranked_results[:10])
+    return reranked_results
+
+@app.route("/search", methods=["GET"])
+def search():
+    query = request.args.get("query", "")
+    top_n = int(request.args.get("k", 5))
+    n = int(request.args.get("n", 50))
+
+
+    try:
+        query_request = QueryRequest(q=query, k=top_n, n=n)
+        #print(f"Validated query request: {query_request}")
+    except ValidationError as e:
+        print(f"Validation error: {str(e)}")
+        return jsonify({"error": str(e)}), 400
+
+    # Step 1: Retrieve all the links from the database (only title for Cohere)
+    session = db.session
+    links = session.query(Link).all()  # Retrieve all links from the database
+
+    # Prepare documents with only the essential fields (id, title) for BM25 and Cohere
+    documents = [{
+        "id": link.id,
+        "title": link.title or "",
+    } for link in links]
+
+    if not documents:
+        return jsonify({"error": "No links in database"}), 400
+
+    reranked_results = rerank_with_cohere(query_request.q, documents, model="rerank-v3.5")
+
+    # Step 2: Now that we have the ranked documents, we need to fetch the full data from DB
+    reranked_ids = [result["id"] for result in reranked_results]  # Extract the ids of the reranked documents
+
+
+    full_links = session.query(Link).filter(Link.id.in_(reranked_ids)).all()
+
+    final_results = []
+
+
+    full_links = session.query(Link).all()  # Make sure you fetch all the links from the database
+   
+    for result in reranked_results:
+
+        link = next((link for link in full_links if str(link.id) == str(result["id"])), None)
+
+        if link:
+            
+            creator_username = session.query(User).filter_by(id=link.creator_id).first().username if link.creator_id else "unknown"
+            
+            final_results.append({
+                "id": str(link.id),
+                "title": link.title,
+                "description": link.description,
+                "url": link.url,
+                "tags": link.tags or "",  # if tags exists
+                "creator_username": creator_username,
+                "created_at": link.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "likes_count": len(session.query(LinkLike).filter_by(link_id=link.id).all()) or 0,  # Add likes_count from the DB
+                "score": result["score"],  # From Cohere rerank
+            })
+            
+        else:
+            print(f"No link found for ID {result['id']}")  
+
+    print(f"Total final results: {final_results}")
+
+    return json.dumps(final_results, ensure_ascii=False)
 
 # ---------------- VERIFY EMAIL ----------------
 
@@ -960,6 +1011,7 @@ def delete_link(link_id):
     db.session.commit()
 
     return jsonify(ok=True, message="Deleted")
+
 if __name__ == "__main__":
     init_db()
     app.run(host="0.0.0.0", port=5000, debug=True)
