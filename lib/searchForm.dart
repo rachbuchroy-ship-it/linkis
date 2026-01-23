@@ -15,6 +15,27 @@ class SearchForm extends StatefulWidget {
 }
 
 class _SearchFormState extends State<SearchForm> {
+  Widget _linkImage(String? imageUrl) {
+    final raw = (imageUrl ?? '').trim();
+    final fixed = raw.isEmpty ? null : _ensureScheme(raw);
+
+    return CircleAvatar(
+      radius: 28, // מסגרת
+      backgroundColor: Colors.grey.shade300,
+      child: CircleAvatar(
+        radius: 27,
+        backgroundColor: Colors.grey.shade200,
+        backgroundImage: fixed != null ? NetworkImage(fixed) : null,
+        child: fixed == null
+            ? const Icon(Icons.image_not_supported, color: Colors.grey)
+            : null,
+        onBackgroundImageError: fixed != null ? (_, __) {} : null,
+      ),
+    );
+
+
+  }
+
   final TextEditingController linkSearchName = TextEditingController();
   int? get currentUserId => widget.userId; // 👈 nullable
   bool get isGuest => currentUserId == null;
@@ -406,6 +427,7 @@ Future<void> _shareToWhatsApp(String title, String url) async {
 
                       final title = (map['title'] ?? '').toString();
                       final url = (map['url'] ?? '').toString();
+                      final imageUrl = (map['image_url'] ?? '').toString();
                       final creator = (map['creator_username'] ?? '').toString().trim();
                       final createdAt = _formatIsoDate(map['created_at']);
                       final likesCount = int.tryParse((map['likes_count'] ?? 0).toString()) ?? 0;
@@ -417,6 +439,7 @@ Future<void> _shareToWhatsApp(String title, String url) async {
                       final linkId = (idRaw is int) ? idRaw : int.tryParse('$idRaw') ?? 0;
                         return Card(
                           child: ListTile(
+                            leading: _linkImage(imageUrl),
                             title: Text(title.trim().isEmpty ? '(no title)' : title),
                             subtitle: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
