@@ -1,3 +1,4 @@
+from __future__ import annotations
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
@@ -16,10 +17,17 @@ from pydantic import BaseModel, ValidationError
 from typing import List
 import cohere
 import json
+from pathlib import Path
+from flask import send_file
 
+from database import db
+from db_configuration import sync_db
+from get_image import get_whatsapp_image_url
+from models import User, Link, Category, LinkLike
+ 
 # ---------------- COHERE API KEY ----------------
-COHERE_API_KEY = os.getenv("COHERE_API_KEY", "").strip()
-COHERE_RERANK_MODEL = os.getenv("COHERE_RERANK_MODEL", "rerank-v3.5")
+COHERE_API_KEY = "DUveGw7OXleT0sTG0MxeV4Hjd9oKUrl43bStQPby"
+COHERE_RERANK_MODEL = "COHERE_RERANK_MODEL=rerank-v3.5"
 
 co = cohere.Client(COHERE_API_KEY)  # Initialize Cohere client
 
@@ -33,7 +41,7 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
 )
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-db = SQLAlchemy(app)
+db.init_app(app)
 # ---------------- EMAIL / VERIFICATION ----------------
 
 def generate_verification_code() -> str:
@@ -41,7 +49,6 @@ def generate_verification_code() -> str:
 
 GMAIL_ADDRESS = "linkiz12321@gmail.com"
 GMAIL_APP_PASSWORD = "fhaq lcdq jiri ivcd" 
-
 
 def send_verification_email(email: str, code: str):
     msg = MIMEText(f"Your verification code is: {code}")
@@ -76,85 +83,6 @@ def send_password_reset_email(email: str, reset_link: str):
         print(f"[RESET EMAIL SENT] to {email}")
     except Exception as e:
         print("[RESET EMAIL ERROR]", e)
-
-# ---------------- MODELS ----------------
-
-class User(db.Model):
-    __tablename__ = "users"
-
-    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    username = db.Column(db.String(255), unique=True, nullable=False)
-    email = db.Column(db.String(255), unique=True, nullable=False)
-
-    # plain text for now (as you requested). Still validate + reset tokens.
-    password = db.Column(db.String(255), nullable=False)
-
-    # reset mechanism
-    password_reset_token = db.Column(db.String(128), nullable=True)
-    password_reset_expires_at = db.Column(db.DateTime, nullable=True)
-
-    is_verified = db.Column(db.Boolean, default=False, nullable=False)
-    verification_code = db.Column(db.String(10), nullable=True)
-    verification_expires_at = db.Column(db.DateTime, nullable=True)
-
-    links = db.relationship("Link", backref="user", lazy=True)
-
-link_categories = db.Table(
-    "link_categories",
-    db.Column("link_id", db.Integer, db.ForeignKey("links.id"), primary_key=True),
-    db.Column("category_id", db.Integer, db.ForeignKey("categories.id"), primary_key=True),
-)
-
-class Category(db.Model):
-    __tablename__ = "categories"
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(80), unique=True, nullable=False)
-
-class Link(db.Model):
-    __tablename__ = "links"
-
-    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    creator_id = db.Column(
-        "user_id",
-        db.Integer,
-        db.ForeignKey("users.id"),
-        nullable=False
-    )
-
-    url = db.Column(db.String(1024), nullable=False)
-    title = db.Column(db.String(255), nullable=False)
-    description = db.Column(db.Text, nullable=True)
-    tags = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-
-    search_vector = db.Column(TSVECTOR)
-    # NEW
-    categories = db.relationship("Category", secondary=link_categories, lazy="subquery")
-
-def is_strong_password(p: str) -> bool:
-    if not p or len(p) < 8:
-        return False
-    if not any(ch.isupper() for ch in p):
-        return False
-    if not any(ch.isdigit() for ch in p):
-        return False
-    return True
-class LinkLike(db.Model):
-    __tablename__ = "link_likes"
-
-    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
-    link_id = db.Column(db.Integer, db.ForeignKey("links.id"), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-
-    __table_args__ = (
-        db.UniqueConstraint("user_id", "link_id", name="uq_user_link_like"),
-    )
-
-
-def init_db():
-    with app.app_context():
-        db.create_all()
 
 # ---------------- PASSWORD RESET ----------------
 
@@ -381,6 +309,14 @@ def reset_password_page():
 """
 
 
+def is_strong_password(p: str) -> bool:
+    if not p or len(p) < 8:
+        return False
+    if not any(ch.isupper() for ch in p):
+        return False
+    if not any(ch.isdigit() for ch in p):
+        return False
+    return True
 
 @app.route("/reset-password", methods=["POST"])
 def reset_password_submit():
@@ -419,7 +355,7 @@ def reset_password_submit():
 @app.route("/users/<int:user_id>/liked-links", methods=["GET"])
 def get_user_likes(user_id):
     try:
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         if not user:
             return jsonify(success=False, message="User not found"), 404
         
@@ -449,7 +385,7 @@ def toggle_like(link_id):
         print("user_id is missing")
         return jsonify(success=False, message="Missing user_id"), 400
 
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     print(f"Fetched user: {user}")
 
     if not user:
@@ -535,6 +471,23 @@ def login():
 
 # ---------------- LINKS ----------------
 
+def get_image_url_or_default(link_url: str) -> str:
+    try:
+        img_url = get_whatsapp_image_url(link_url)
+        img_url = (img_url or "").strip()
+        if img_url:
+            return img_url
+    except Exception:
+        pass
+
+    return request.host_url.rstrip("/") + "/assets/default-chat-image"
+
+@app.get("/assets/default-chat-image")
+def default_chat_image():
+    img_path = Path(__file__).resolve().parent / "assets" / "default_chat_image.png"
+    return send_file(img_path, mimetype="image/png")
+
+
 @app.route("/links", methods=["POST"])
 def add_link():
     data = request.get_json(silent=True) or {}
@@ -551,7 +504,7 @@ def add_link():
     if not user_id:
         return jsonify({"error": "Missing 'user_id'"}), 400
 
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     if not user:
         return jsonify({"error": "User not found"}), 404
 
@@ -562,12 +515,15 @@ def add_link():
         title = url
 
     try:
+        image_url = get_image_url_or_default(url)
+        
         new_link = Link(
             creator_id=user_id,
             url=url,
             title=title,
             description=description or None,
             tags=tags or None,
+            image_url=image_url
         )
         db.session.add(new_link)
         db.session.commit()
@@ -591,6 +547,7 @@ def add_link():
             "title": new_link.title,
             "description": new_link.description,
             "tags": new_link.tags,
+            "image_url": new_link.image_url,
             "creator_id": new_link.creator_id,
         }), 201
 
@@ -746,6 +703,7 @@ def bm25_retriever(query: str, top_n: int = 50): # 'for futhere usege
     print(f"Top {top_n} results based on BM25 scores: {results}")
 
     return results
+
 def rerank_with_cohere(query: str, documents: List[dict], model="rerank-v3.5"):
     if not documents:
         print("No documents to rerank.")
@@ -776,10 +734,8 @@ def search():
     top_n = int(request.args.get("k", 5))
     n = int(request.args.get("n", 50))
 
-
     try:
         query_request = QueryRequest(q=query, k=top_n, n=n)
-        #print(f"Validated query request: {query_request}")
     except ValidationError as e:
         print(f"Validation error: {str(e)}")
         return jsonify({"error": str(e)}), 400
@@ -827,6 +783,7 @@ def search():
                 "creator_username": creator_username,
                 "created_at": link.created_at.strftime("%Y-%m-%d %H:%M:%S"),
                 "likes_count": len(session.query(LinkLike).filter_by(link_id=link.id).all()) or 0,  # Add likes_count from the DB
+                "image_url": link.image_url,
                 "score": result["score"],  # From Cohere rerank
             })
             
@@ -887,7 +844,7 @@ def my_links():
     if not user_id:
         return jsonify(ok=False, message="Missing user_id"), 400
 
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     if not user:
         return jsonify(ok=False, message="User not found"), 404
 
@@ -923,6 +880,7 @@ def my_links():
             "tags": link.tags,
             "created_at": link.created_at.isoformat(),
             "creator_id": link.creator_id,
+            "image_url": link.image_url,
             "likes_count": int(like_counts.get(link.id, 0)),
         })
 
@@ -937,7 +895,7 @@ def update_link(link_id):
     if not user_id:
         return jsonify(ok=False, message="Missing user_id"), 400
 
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     if not user:
         return jsonify(ok=False, message="User not found"), 404
     if not user.is_verified:
@@ -990,7 +948,7 @@ def delete_link(link_id):
     if not user_id:
         return jsonify(ok=False, message="Missing user_id"), 400
 
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     if not user:
         return jsonify(ok=False, message="User not found"), 404
     if not user.is_verified:
@@ -1013,5 +971,5 @@ def delete_link(link_id):
     return jsonify(ok=True, message="Deleted")
 
 if __name__ == "__main__":
-    init_db()
+    sync_db(app, db)
     app.run(host="0.0.0.0", port=5000, debug=True)
