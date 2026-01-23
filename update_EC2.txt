@@ -5,10 +5,11 @@ flutter update:
     flutter pub get
     flutter build web --release
 
+    // כרגע אין צורך
     #create new folder in ec2 and give it premisions
-    sudo mkdir -p /var/www/linkiz
-    sudo chown -R ubuntu:ubuntu /var/www/linkiz
-    sudo chmod -R 755 /var/www/linkiz
+    #sudo mkdir -p /var/www/linkiz
+    #sudo chown -R ubuntu:ubuntu /var/www/linkiz
+    #sudo chmod -R 755 /var/www/linkiz
 
     #transfer files to EC2
         ssh -i C:\Users\menas\Downloads\key.pem ubuntu@100.31.196.241 "rm -rf /var/www/linkiz/*" && scp -i C:\Users\menas\Downloads\key.pem -r C:\linkis-royrachbuch\build\web\* ubuntu@100.31.196.241:/var/www/linkiz/
