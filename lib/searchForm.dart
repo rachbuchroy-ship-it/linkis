@@ -36,6 +36,69 @@ class _SearchFormState extends State<SearchForm> {
 
   }
 
+  void sortByScoreThenLikesInWindow(List<dynamic> results, {double window = 0.015}) {
+  // 1) sort by score desc
+  double getScore(dynamic x) {
+    final v = (x is Map) ? x['score'] : null;
+    if (v is num) return v.toDouble();
+    return double.tryParse((v ?? '').toString()) ?? double.negativeInfinity;
+  }
+
+  int getLikes(dynamic x) {
+    final v = (x is Map) ? x['likes_count'] : null;
+    return int.tryParse((v ?? 0).toString()) ?? 0;
+  }
+
+  // initial stable-ish sort by score desc (and likes as a tie-breaker, optional)
+  results.sort((a, b) {
+    final sA = getScore(a);
+    final sB = getScore(b);
+    final byScore = sB.compareTo(sA);
+    if (byScore != 0) return byScore;
+    return getLikes(b).compareTo(getLikes(a));
+  });
+
+  // 2) group consecutive items whose scores are within ±window of the group's anchor score
+  final List<dynamic> finalList = [];
+  int i = 0;
+
+  while (i < results.length) {
+    final anchorScore = getScore(results[i]);
+
+    // build a "window group" around the anchor score in the *sorted* list
+    int j = i;
+    while (j < results.length) {
+      final s = getScore(results[j]);
+      if ((anchorScore - s).abs() <= window) {
+        j++;
+      } else {
+        break;
+      }
+    }
+
+    // group is [i, j)
+    final group = results.sublist(i, j);
+
+    // 3) sort this group by likes desc (keep score desc as secondary so it stays sane)
+    group.sort((a, b) {
+      final byLikes = getLikes(b).compareTo(getLikes(a));
+      if (byLikes != 0) return byLikes;
+
+      final sA = getScore(a);
+      final sB = getScore(b);
+      return sB.compareTo(sA);
+    });
+
+    finalList.addAll(group);
+    i = j;
+  }
+
+  // 4) write back
+  results
+    ..clear()
+    ..addAll(finalList);
+}
+
   final TextEditingController linkSearchName = TextEditingController();
   int? get currentUserId => widget.userId; // 👈 nullable
   bool get isGuest => currentUserId == null;
@@ -215,11 +278,7 @@ Future<void> _shareToWhatsApp(String title, String url) async {
           results = [];
         }
 
-        results.sort((a, b) {
-          final likesA = int.tryParse((a['likes_count'] ?? 0).toString()) ?? 0;
-          final likesB = int.tryParse((b['likes_count'] ?? 0).toString()) ?? 0;
-          return likesB.compareTo(likesA); 
-        });
+        sortByScoreThenLikesInWindow(results, window: 0.05);
 
         setState(() {
           searchResults = results;

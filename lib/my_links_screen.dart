@@ -238,8 +238,43 @@ Future<void> confirmDelete(int linkId) async {
                   itemCount: links.length,
                   itemBuilder: (context, i) {
                     final link = links[i] as Map<String, dynamic>;
+                    final String imageUrl = (link["image_url"] ?? "").toString().trim();
                     return Card(
                       child: ListTile(
+                        leading: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: SizedBox(
+                            width: 56,
+                            height: 56,
+                            child: imageUrl.isEmpty
+                                ? Container(
+                                    color: Colors.black12,
+                                    child: const Icon(Icons.link, size: 26),
+                                  )
+                                : Image.network(
+                                    imageUrl,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return Container(
+                                        color: Colors.black12,
+                                        child: const Icon(Icons.broken_image, size: 26),
+                                      );
+                                    },
+                                    loadingBuilder: (context, child, loadingProgress) {
+                                      if (loadingProgress == null) return child;
+                                      return Container(
+                                        color: Colors.black12,
+                                        alignment: Alignment.center,
+                                        child: const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                          ),
+                        ),
                         title: Text(link["title"] ?? ""),
                         subtitle: Text(link["url"] ?? ""),
                         trailing: Row(
@@ -250,14 +285,14 @@ Future<void> confirmDelete(int linkId) async {
                               onPressed: () => openEditDialog(link),
                             ),
                             IconButton(
-                            icon: const Icon(Icons.delete),
-                            onPressed: () => confirmDelete(link["id"]),
+                              icon: const Icon(Icons.delete),
+                              onPressed: () => confirmDelete(link["id"]),
                             ),
-
                           ],
                         ),
                       ),
                     );
+
                   },
                 ),
               ),

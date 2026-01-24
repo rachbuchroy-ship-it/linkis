@@ -497,6 +497,7 @@ def add_link():
     description = (data.get("description") or "").strip()
     tags = (data.get("tags") or "").strip()
     user_id = data.get("user_id")
+    platform  = data.get("platform").strip()
 
     if not url:
         return jsonify({"error": "Missing 'url'"}), 400
@@ -523,7 +524,8 @@ def add_link():
             title=title,
             description=description or None,
             tags=tags or None,
-            image_url=image_url
+            image_url=image_url,
+            platform=platform 
         )
         db.session.add(new_link)
         db.session.commit()

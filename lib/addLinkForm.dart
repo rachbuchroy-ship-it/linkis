@@ -46,8 +46,69 @@ class _AddLinkFormState extends State<AddLinkForm> {
     super.dispose();
   }
 
+  String? detectPlatform(String inputUrl) {
+    final u = inputUrl.trim();
+    if (u.isEmpty) return null;
+
+    final withScheme = u.startsWith('http://') || u.startsWith('https://')
+        ? u
+        : 'https://$u';
+
+    final uri = Uri.tryParse(withScheme);
+    if (uri == null) return null;
+
+    final host = uri.host.toLowerCase();
+
+    const allowedHosts = <String, String>{
+      'wa.me': 'whatsapp',
+      'www.wa.me': 'whatsapp',
+      'api.whatsapp.com': 'whatsapp',
+      'chat.whatsapp.com': 'whatsapp',
+
+      't.me': 'telegram',
+      'www.t.me': 'telegram',
+      'telegram.me': 'telegram',
+
+      'facebook.com': 'facebook',
+      'www.facebook.com': 'facebook',
+      'm.facebook.com': 'facebook',
+
+      'instagram.com': 'instagram',
+      'www.instagram.com': 'instagram',
+
+      'twitter.com': 'twitter',
+      'www.twitter.com': 'twitter',
+      'x.com': 'twitter',
+      'www.x.com': 'twitter',
+    };
+
+    // match מדויק או סאב-דומיין (כמו subdomain.instagram.com)
+    for (final entry in allowedHosts.entries) {
+      final h = entry.key;
+      if (host == h || host.endsWith('.$h')) return entry.value;
+    }
+
+    return 'unsupported';
+  }
+
+
   Future<void> _addLink() async {
     final url = _urlController.text.trim();
+    final platform = detectPlatform(url);
+    print('platform: ${platform}');
+    if (platform == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invalid URL')),
+      );
+      return;
+    }
+    if (platform == 'unsupported') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Only WhatsApp/Telegram/Facebook/Instagram/Twitter links are allowed')),
+      );
+      return;
+    }
+
     final title = _titleController.text.trim();
     final description = _descriptionController.text.trim();
     final tags = _tagsController.text.trim();
@@ -88,6 +149,7 @@ class _AddLinkFormState extends State<AddLinkForm> {
           'description': description,
           'tags': tags,
           'user_id': widget.loggedInUserId,
+          'platform': platform, 
         }),
       );
 

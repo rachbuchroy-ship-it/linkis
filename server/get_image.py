@@ -3,10 +3,59 @@ import html as htmllib
 
 # ---------------- Whatsapp ----------------
 
-def extract_og_image(page_url: str) -> str | None:
+def scan_after_two_needles(
+    text: str,
+    first_needle: str,
+    second_needle: str,
+    *,
+    end_char: str = '"',
+    start_pos: int = 0,
+) -> str | None:
     """
-    Downloads HTML from page_url and extracts the og:image content URL
-    by scanning char-by-char (as you requested).
+    1) Finds first_needle in text (starting at start_pos).
+    2) From there, scans char-by-char to find second_needle.
+    3) Captures chars until end_char.
+    Returns captured string (not unescaped) or None.
+    """
+    start = text.find(first_needle, start_pos)
+    if start == -1:
+        return None
+
+    i = start
+    j = 0  # match index for second_needle
+
+    # scan for second_needle char-by-char
+    while i < len(text):
+        ch = text[i]
+        if ch == second_needle[j]:
+            j += 1
+            if j == len(second_needle):
+                i += 1  # move to the first char after second_needle
+                break
+        else:
+            # overlap-friendly reset
+            j = 1 if ch == second_needle[0] else 0
+        i += 1
+
+    if j != len(second_needle):
+        return None
+
+    # capture until end_char
+    captured = []
+    while i < len(text) and text[i] != end_char:
+        captured.append(text[i])
+        i += 1
+
+    if i >= len(text) or text[i] != end_char:
+        return None
+
+    return "".join(captured).strip()
+
+
+def extract_link_image(page_url: str) -> str | None:
+    """
+    Downloads HTML from page_url and extracts og:image content URL
+    using the generic scanner.
     Returns the cleaned image URL (HTML entities decoded) or None.
     """
     r = requests.get(
@@ -16,45 +65,22 @@ def extract_og_image(page_url: str) -> str | None:
         allow_redirects=True,
     )
     r.raise_for_status()
+
     page_html = r.text
-    
-    image_exist = page_html.find("_ari4")
-    if image_exist is None:
+
+    raw_url = scan_after_two_needles(
+        page_html,
+        first_needle='og:image"',
+        second_needle='content="',
+        end_char='"',
+    )
+
+
+    if raw_url is None:
         return None
 
-    needle = 'og:image"'
-    start = page_html.find(needle)
-    if start == -1:
-        return None
-
-    content_needle = 'content="'
-    i = start
-    j = 0
-
-    while i < len(page_html):
-        ch = page_html[i]
-        if ch == content_needle[j]:
-            j += 1
-            if j == len(content_needle):
-                i += 1  # right after content="
-                break
-        else:
-            j = 1 if ch == content_needle[0] else 0
-        i += 1
-
-    if j != len(content_needle):
-        return None
-
-    captured = []
-    while i < len(page_html) and page_html[i] != '"':
-        captured.append(page_html[i])
-        i += 1
-
-    if i >= len(page_html) or page_html[i] != '"':
-        return None
-
-    raw_url = "".join(captured).strip()
     return htmllib.unescape(raw_url)
+
 
 def get_whatsapp_image_url(initial_url: str) -> bytes:
     """
@@ -71,11 +97,11 @@ def get_whatsapp_image_url(initial_url: str) -> bytes:
     Returns:
       - bytes of the downloaded image
     """
-    og_url = extract_og_image(initial_url)
-    if not og_url:
+    url = extract_link_image(initial_url)
+    if not url:
         return None
 
-    return og_url
+    return url
 
 # ---------------- Telegram ----------------
 def get_telegram_image_url(initial_url: str) -> bytes:
