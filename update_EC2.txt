@@ -1,9 +1,12 @@
+venv entering in windows:
+    ./.venv/Scripts/Activate.ps1
+
 flutter update:
 
     #Generate html & javascript files
     flutter clean
     flutter pub get
-    flutter build web --release
+    flutter build web --release --pwa-strategy=none
 
     // כרגע אין צורך
     #create new folder in ec2 and give it premisions

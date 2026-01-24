@@ -50,6 +50,8 @@ class Link(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     image_url = db.Column(db.String(2048), nullable=True)
 
+    platform = db.Column(db.String(32), nullable=False, default="unknown", index=True)
+
     search_vector = db.Column(TSVECTOR)
 
     categories = db.relationship(
